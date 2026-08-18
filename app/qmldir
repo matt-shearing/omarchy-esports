@@ -1,0 +1,7 @@
+# Declaring a qmldir makes this directory a QML module, which means every
+# component it exposes must be listed here — implicit sibling resolution no
+# longer applies once the file exists.
+singleton Theme 1.0 Theme.qml
+AppButton 1.0 AppButton.qml
+AppTeamBadge 1.0 AppTeamBadge.qml
+MatchCard 1.0 MatchCard.qml

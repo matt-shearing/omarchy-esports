@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "contra.esports",
+  "name": "Esports",
+  "version": "0.1.0",
+  "author": "contra",
+  "description": "Spoiler-free esports schedule with streams and VODs",
+  "license": "MIT",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Esports",
+    "description": "Upcoming matches for the teams you follow, with stream links and spoiler-free VODs",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "showLabel": true,
+      "maxRows": 10,
+      "showFinished": true,
+      "hideWhenEmpty": false
+    },
+    "schema": [
+      {
+        "key": "showLabel",
+        "type": "boolean",
+        "label": "Show match label",
+        "description": "Show the next match beside the icon rather than the icon alone",
+        "defaultValue": true
+      },
+      {
+        "key": "maxRows",
+        "type": "integer",
+        "label": "Rows in the panel",
+        "min": 3,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 10
+      },
+      {
+        "key": "showFinished",
+        "type": "boolean",
+        "label": "Show finished matches",
+        "description": "List recently finished matches so their VODs are reachable",
+        "defaultValue": true
+      },
+      {
+        "key": "hideWhenEmpty",
+        "type": "boolean",
+        "label": "Hide when nothing is scheduled",
+        "defaultValue": false
+      }
+    ]
+  }
+}

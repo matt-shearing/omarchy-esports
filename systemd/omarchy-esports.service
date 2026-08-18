@@ -1,0 +1,24 @@
+[Unit]
+Description=Omarchy esports schedule daemon
+Documentation=https://github.com/contra/omarchy-esports
+# Notifications need a session bus. Without one the daemon still runs and
+# still maintains state; it just cannot raise desktop notifications.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/omarchy-esports daemon
+Restart=on-failure
+RestartSec=30s
+
+# A network client with no need for elevated access.
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryMax=256M
+
+[Install]
+WantedBy=graphical-session.target
