@@ -26,6 +26,23 @@ type Opponent struct {
 	Short string `json:"short"`          // ticker abbreviation, e.g. "TSpirit"
 	Page  string `json:"page,omitempty"` // liquipedia page path
 	Logo  Logo   `json:"logo,omitempty"` // light/dark variants
+
+	// Hidden marks a side withheld by catch-up masking. When it is set every
+	// other field on this opponent is empty: knowing who a followed team plays
+	// next reveals that they won their previous match, so the identity is
+	// removed from the published state rather than merely not drawn.
+	Hidden bool `json:"hidden,omitempty"`
+}
+
+// URL returns the opponent's Liquipedia page, or "" when unknown or hidden.
+func (o Opponent) URL() string {
+	if o.Hidden || o.Page == "" {
+		return ""
+	}
+	if strings.HasPrefix(o.Page, "http") {
+		return o.Page
+	}
+	return "https://liquipedia.net" + o.Page
 }
 
 // Logo carries the light/dark artwork Liquipedia publishes for a team. The UI
@@ -113,6 +130,32 @@ type Match struct {
 	Revealed bool `json:"revealed,omitempty"`
 	// Followed is true when either opponent is on the user's follow list.
 	Followed bool `json:"followed,omitempty"`
+
+	// Watched records that the user has seen this match, which advances the
+	// catch-up queue.
+	Watched bool `json:"watched,omitempty"`
+
+	// QueueHead marks the earliest unwatched finished match for a followed
+	// team: the one to watch next, and the only one shown in full.
+	QueueHead bool `json:"queueHead,omitempty"`
+
+	// Masked is set when catch-up masking hid one or both opponents.
+	Masked bool `json:"masked,omitempty"`
+
+	// MaskedFor names the followed team whose backlog caused the masking, so
+	// the UI can say why a fixture is hidden.
+	MaskedFor string `json:"maskedFor,omitempty"`
+}
+
+// TournamentURL returns the tournament's Liquipedia page.
+func (m *Match) TournamentURL() string {
+	if m.Tournament.Page == "" {
+		return ""
+	}
+	if strings.HasPrefix(m.Tournament.Page, "http") {
+		return m.Tournament.Page
+	}
+	return "https://liquipedia.net" + m.Tournament.Page
 }
 
 // ComputeID derives a stable identifier from the properties that do not change

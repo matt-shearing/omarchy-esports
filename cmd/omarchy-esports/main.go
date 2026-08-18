@@ -20,6 +20,7 @@ import (
 
 	"github.com/contra/omarchy-esports/internal/config"
 	"github.com/contra/omarchy-esports/internal/daemon"
+	"github.com/contra/omarchy-esports/internal/fuzzy"
 	"github.com/contra/omarchy-esports/internal/liquipedia"
 	"github.com/contra/omarchy-esports/internal/match"
 	"github.com/contra/omarchy-esports/internal/notify"
@@ -54,6 +55,14 @@ func main() {
 		err = cmdReveal(args, true)
 	case "hide":
 		err = cmdReveal(args, false)
+	case "watched":
+		err = cmdWatched(args, true)
+	case "unwatch":
+		err = cmdWatched(args, false)
+	case "search":
+		err = cmdSearch(args)
+	case "team":
+		err = cmdTeam(args)
 	case "refresh":
 		err = cmdRefresh(args)
 	case "open":
@@ -91,6 +100,12 @@ commands:
                      list | add <name>... | remove <name>...
   reveal <id>      unblind one match's result
   hide <id>        re-blind a revealed match
+  watched <id>     mark a match watched, advancing the catch-up queue
+  unwatch <id>     mark it unwatched again
+  search <query>   fuzzy-search the team index
+                     --json
+  team <name>      show a team's upcoming matches
+                     --json
   refresh          force an immediate refresh
   open <id>        open a match
                      --stream    open the live stream (default)
@@ -422,6 +437,145 @@ func resolveID(st *store.Store, prefix string) (string, error) {
 	}
 }
 
+func cmdWatched(args []string, watched bool) error {
+	if len(args) == 0 {
+		return errors.New("need a match id (see `omarchy-esports status`)")
+	}
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	id, err := resolveID(st, args[0])
+	if err != nil {
+		return err
+	}
+	if err := st.SetWatched(id, watched); err != nil {
+		return err
+	}
+	// Republish so the queue advances immediately rather than at the next poll.
+	return cmdRefreshQuiet()
+}
+
+// teamIndex is the shape of teams.json.
+type teamIndex struct {
+	Teams []store.TeamEntry `json:"teams"`
+}
+
+func loadTeamIndex(st *store.Store) ([]store.TeamEntry, error) {
+	data, err := os.ReadFile(st.TeamsPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.New("no team index yet — run `omarchy-esports refresh` first")
+		}
+		return nil, err
+	}
+	var idx teamIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, err
+	}
+	return idx.Teams, nil
+}
+
+func cmdSearch(args []string) error {
+	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	limit := fs.Int("limit", 15, "maximum results")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if query == "" {
+		return errors.New("need a search query")
+	}
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	teams, err := loadTeamIndex(st)
+	if err != nil {
+		return err
+	}
+	cfg, _ := config.Load()
+
+	type scored struct {
+		store.TeamEntry
+		Score    int  `json:"score"`
+		Followed bool `json:"followed"`
+	}
+	var hits []scored
+	for _, t := range teams {
+		if s := fuzzy.Best(query, t.Name, t.Short); s != fuzzy.NoMatch {
+			hits = append(hits, scored{TeamEntry: t, Score: s, Followed: cfg.Follows(t.Name)})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if len(hits) > *limit {
+		hits = hits[:*limit]
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(hits)
+	}
+	if len(hits) == 0 {
+		fmt.Printf("no team matching %q in the index (%d known)\n", query, len(teams))
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "TEAM\tSHORT\tGAME\tFOLLOWED")
+	for _, h := range hits {
+		star := ""
+		if h.Followed {
+			star = "*"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, h.Short, h.Game, star)
+	}
+	return w.Flush()
+}
+
+func cmdTeam(args []string) error {
+	fs := flag.NewFlagSet("team", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	name := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if name == "" {
+		return errors.New("need a team name")
+	}
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	pub, err := st.LoadPublic()
+	if err != nil {
+		return err
+	}
+	var out []match.Match
+	for _, m := range pub.Matches {
+		if m.Involves([]string{name}) {
+			out = append(out, m)
+		}
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	if len(out) == 0 {
+		fmt.Printf("no scheduled matches for %q\n", name)
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "WHEN\tMATCH\tTOURNAMENT\tID")
+	for _, m := range out {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			whenLabel(m), matchLabel(m), truncate(m.Tournament.Name, 34), m.ID[:8])
+	}
+	return w.Flush()
+}
+
 func cmdOpen(args []string) error {
 	fs := flag.NewFlagSet("open", flag.ExitOnError)
 	wantVOD := fs.Bool("vod", false, "open the VOD")
@@ -478,7 +632,18 @@ func cmdOpen(args []string) error {
 		return errors.New("nothing to open for this match yet")
 	}
 	cmd := notify.OpenCommand(url)
-	return exec.Command("bash", "-lc", cmd).Start()
+	if err := exec.Command("bash", "-lc", cmd).Start(); err != nil {
+		return err
+	}
+	// Opening the recording is the natural signal that this match has been
+	// watched, which advances the catch-up queue. `unwatch` undoes it.
+	if m.VOD != nil && url == m.VOD.URL {
+		if err := st.SetWatched(m.ID, true); err != nil {
+			return err
+		}
+		return cmdRefreshQuiet()
+	}
+	return nil
 }
 
 func cmdConfig(args []string) error {

@@ -4,10 +4,13 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/contra/omarchy-esports/internal/config"
@@ -32,6 +35,15 @@ type Daemon struct {
 	// fetch. Each costs a 30-second rate-limit slot, so an unbounded sweep on
 	// first run would take many minutes.
 	maxTournamentFetches int
+
+	// configModTime tracks the config file so edits are picked up without a
+	// restart. The app and the CLI both mutate the follow list by writing this
+	// file, and a daemon holding a startup snapshot would silently ignore them.
+	configModTime time.Time
+
+	// mu serialises state mutation. The first refresh runs concurrently with
+	// the tick loop, so both paths can reach the store at once.
+	mu sync.Mutex
 }
 
 // Options configures a Daemon.
@@ -53,8 +65,14 @@ func New(o Options) *Daemon {
 	notifier.DryRun = o.DryRun
 	notifier.Log = func(s string) { logger.Print(s) }
 
+	var modTime time.Time
+	if fi, err := os.Stat(config.Path()); err == nil {
+		modTime = fi.ModTime()
+	}
+
 	return &Daemon{
 		cfg:                  o.Config,
+		configModTime:        modTime,
 		lp:                   liquipedia.New(o.Version, o.Config.ContactEmail, store.CacheDir()),
 		yt:                   youtube.New(15 * time.Minute),
 		store:                o.Store,
@@ -70,9 +88,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.logger.Printf("starting: %d wiki(s), poll every %s, spoilers=%s",
 		len(d.cfg.EnabledWikis()), interval, d.cfg.Spoilers)
 
-	if err := d.RefreshOnce(ctx); err != nil {
-		d.logger.Printf("initial refresh: %v", err)
-	}
+	// Run the first refresh concurrently. It is slow by design — Liquipedia
+	// allows one parse per 30 seconds, so three wikis take a couple of minutes
+	// — and doing it inline would leave the shorter tick unserviced for that
+	// whole time, delaying config reloads and republishes at exactly the
+	// moment a new user is setting things up.
+	go func() {
+		if err := d.RefreshOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			d.logger.Printf("initial refresh: %v", err)
+		}
+	}()
 
 	poll := time.NewTicker(interval)
 	defer poll.Stop()
@@ -91,6 +116,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 				d.logger.Printf("refresh: %v", err)
 			}
 		case <-tick.C:
+			d.reloadConfigIfChanged()
 			if err := d.Reevaluate(ctx); err != nil {
 				d.logger.Printf("reevaluate: %v", err)
 			}
@@ -100,6 +126,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 // RefreshOnce performs a full poll: fetch tickers, enrich, notify, persist.
 func (d *Daemon) RefreshOnce(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	priv, err := d.store.LoadPrivate()
 	if err != nil {
 		return fmt.Errorf("loading state: %w", err)
@@ -141,6 +170,8 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 		d.logger.Printf("enrichment: %v", err)
 	}
 
+	d.indexTeams(all, &priv)
+
 	priv.Matches = all
 	priv.UpdatedAt = time.Now()
 	if err := d.store.SavePrivate(priv); err != nil {
@@ -150,12 +181,100 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	if err := d.store.SavePrivate(priv); err != nil {
 		return fmt.Errorf("saving notification state: %w", err)
 	}
+	if err := d.publishTeams(priv); err != nil {
+		d.logger.Printf("writing team index: %v", err)
+	}
 	return d.publish(priv, errs)
+}
+
+// indexTeams accumulates every team seen in a ticker into a searchable index.
+//
+// Building it from matches we have already fetched means the app's follow-list
+// search costs no extra API calls and works offline, and it naturally covers
+// the teams that are actually competing. The index is cumulative: teams are
+// kept after their matches age out, so it grows into a directory over time.
+func (d *Daemon) indexTeams(ms []match.Match, priv *store.Private) {
+	if priv.Teams == nil {
+		priv.Teams = map[string]store.TeamEntry{}
+	}
+	now := time.Now()
+	for _, m := range ms {
+		for _, o := range m.Opponents {
+			name := strings.TrimSpace(o.Name)
+			if name == "" || o.Hidden || strings.EqualFold(name, "TBD") {
+				continue
+			}
+			key := strings.ToLower(name)
+			entry, ok := priv.Teams[key]
+			if !ok {
+				entry = store.TeamEntry{Name: name}
+			}
+			entry.Short = firstNonEmpty(o.Short, entry.Short)
+			entry.Page = firstNonEmpty(o.Page, entry.Page)
+			entry.Wiki = firstNonEmpty(m.Wiki, entry.Wiki)
+			entry.Game = firstNonEmpty(m.Game, entry.Game)
+			// Keep whichever artwork variants we have seen; a later ticker may
+			// only carry one of them.
+			if o.Logo.Light != "" {
+				entry.Logo.Light = o.Logo.Light
+			}
+			if o.Logo.Dark != "" {
+				entry.Logo.Dark = o.Logo.Dark
+			}
+			entry.LastSeen = now
+			priv.Teams[key] = entry
+		}
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// publishTeams writes the searchable index.
+func (d *Daemon) publishTeams(priv store.Private) error {
+	out := make([]store.TeamEntry, 0, len(priv.Teams))
+	for _, t := range priv.Teams {
+		out = append(out, t)
+	}
+	return d.store.SaveTeams(out)
+}
+
+// reloadConfigIfChanged picks up edits to the config file.
+//
+// Following a team from the app writes the config and expects the change to
+// take effect; without this the daemon would keep publishing against the
+// follow list it read at startup, and the button would appear to do nothing.
+func (d *Daemon) reloadConfigIfChanged() {
+	fi, err := os.Stat(config.Path())
+	if err != nil {
+		return
+	}
+	if !fi.ModTime().After(d.configModTime) {
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		d.logger.Printf("reloading config: %v", err)
+		return
+	}
+	d.configModTime = fi.ModTime()
+	d.cfg = cfg
+	d.logger.Printf("config reloaded: %d team(s), spoilers=%s, catch-up=%v",
+		len(cfg.Teams), cfg.Spoilers, cfg.CatchUp.Enabled)
 }
 
 // Reevaluate refreshes derived state and fires time-based notifications
 // without hitting the network.
 func (d *Daemon) Reevaluate(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	priv, err := d.store.LoadPrivate()
 	if err != nil {
 		return err
@@ -175,8 +294,26 @@ func (d *Daemon) Reevaluate(ctx context.Context) error {
 }
 
 // publish writes the redacted view the UI reads.
+//
+// Order matters. Catch-up masking runs first, on a copy, because it needs the
+// real opponents to decide what to hide; the score redaction then runs over
+// the already-masked records. Both happen here rather than in the UI so the
+// withheld data is absent from the published file.
 func (d *Daemon) publish(priv store.Private, errs []string) error {
-	visible := spoiler.RedactAll(priv.Matches, d.cfg.Spoilers, priv.Revealed)
+	staged := make([]match.Match, len(priv.Matches))
+	copy(staged, priv.Matches)
+
+	if d.cfg.CatchUp.Enabled {
+		staged = spoiler.ApplyCatchUp(staged, spoiler.CatchUpOptions{
+			Teams:    d.cfg.Teams,
+			Watched:  priv.Watched,
+			Revealed: priv.Revealed,
+			Window:   time.Duration(d.cfg.CatchUp.Window),
+			Now:      time.Now(),
+		})
+	}
+
+	visible := spoiler.RedactAll(staged, d.cfg.Spoilers, priv.Revealed)
 	return d.store.SavePublic(store.Public{
 		UpdatedAt: priv.UpdatedAt,
 		Matches:   visible,

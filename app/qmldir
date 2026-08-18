@@ -5,3 +5,4 @@ singleton Theme 1.0 Theme.qml
 AppButton 1.0 AppButton.qml
 AppTeamBadge 1.0 AppTeamBadge.qml
 MatchCard 1.0 MatchCard.qml
+TeamResultRow 1.0 TeamResultRow.qml

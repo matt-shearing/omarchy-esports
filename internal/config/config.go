@@ -72,6 +72,12 @@ type Config struct {
 	// HideTBD drops bracket slots whose opponents are not seeded yet.
 	HideTBD bool `json:"hideTBD"`
 
+	// CatchUp controls the backlog masking described in package spoiler: when
+	// you have unwatched matches for a followed team, that team's later
+	// fixtures have their opponent withheld, because knowing who they play
+	// next reveals that they won.
+	CatchUp CatchUp `json:"catchUp"`
+
 	// Horizon is how far ahead to keep matches.
 	Horizon Duration `json:"horizon"`
 
@@ -94,6 +100,15 @@ type Config struct {
 
 	// YouTube holds VOD discovery settings.
 	YouTube YouTube `json:"youtube"`
+}
+
+// CatchUp configures backlog masking.
+type CatchUp struct {
+	// Enabled turns masking on.
+	Enabled bool `json:"enabled"`
+	// Window bounds how far back an unwatched match still counts as a backlog,
+	// so a match missed last month does not hide the schedule forever.
+	Window Duration `json:"window"`
 }
 
 // YouTube configures VOD discovery.
@@ -122,7 +137,11 @@ func Default() Config {
 			// returns matches from 2024-2025). Its live ticker is on Main_Page.
 			{Slug: "starcraft2", Game: "StarCraft II", TickerPage: "Main_Page", Enabled: true},
 		},
-		Spoilers:     SpoilerStrict,
+		Spoilers: SpoilerStrict,
+		CatchUp: CatchUp{
+			Enabled: true,
+			Window:  Duration(48 * time.Hour),
+		},
 		FollowedOnly: false,
 		HideTBD:      true,
 		Horizon:      Duration(14 * 24 * time.Hour),
@@ -185,6 +204,9 @@ func (c *Config) clamp() {
 	}
 	if time.Duration(c.LiveWindow) <= 0 {
 		c.LiveWindow = Duration(4 * time.Hour)
+	}
+	if time.Duration(c.CatchUp.Window) <= 0 {
+		c.CatchUp.Window = Duration(48 * time.Hour)
 	}
 	switch c.Spoilers {
 	case SpoilerStrict, SpoilerBalanced, SpoilerOff:

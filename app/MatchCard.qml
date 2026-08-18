@@ -13,18 +13,24 @@ Rectangle {
 
     signal watch
     signal reveal
+    signal markWatched
+    signal inspectTeam(string name)
 
     readonly property bool live: match ? Model.isLive(match) : false
     readonly property bool finished: match ? Model.isFinished(match) : false
     readonly property bool blacked: match ? match.redacted === true : false
     readonly property bool hasVod: match ? (match.vod !== undefined && match.vod !== null) : false
     readonly property bool highlightsOnly: hasVod && match.vod.kind === "highlights"
+    readonly property bool masked: match ? Model.isMasked(match) : false
+    readonly property bool watched: match ? match.watched === true : false
+    readonly property bool queueHead: match ? match.queueHead === true : false
 
     implicitHeight: layout.implicitHeight + Theme.gap * 2
     radius: Theme.radius
     color: hover.hovered ? Theme.alpha(Theme.foreground, 0.06) : Theme.alpha(Theme.foreground, 0.03)
-    border.width: live ? 1 : 0
-    border.color: Theme.accent
+    border.width: (live || queueHead) ? 1 : 0
+    border.color: queueHead && !live ? Theme.success : Theme.accent
+    opacity: card.watched && !card.queueHead ? 0.55 : 1.0
 
     Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -81,6 +87,7 @@ Rectangle {
                 Layout.fillWidth: true
                 opponent: card.match ? card.match.opponents[0] : null
                 followed: Model.isFollowedTeam(card.match ? card.match.opponents[0] : null, card.teams)
+                onClicked: function (name) { card.inspectTeam(name) }
             }
 
             Text {
@@ -97,6 +104,7 @@ Rectangle {
                 opponent: card.match ? card.match.opponents[1] : null
                 followed: Model.isFollowedTeam(card.match ? card.match.opponents[1] : null, card.teams)
                 mirrored: true
+                onClicked: function (name) { card.inspectTeam(name) }
             }
         }
 
@@ -124,9 +132,10 @@ Rectangle {
                     var parts = []
                     if (card.match && Model.bestOfLabel(card.match)) parts.push(Model.bestOfLabel(card.match))
                     if (card.match && card.match.game) parts.push(card.match.game)
+                    if (card.masked) parts.push("opponent hidden")
                     return parts.join(" · ")
                 }
-                color: Theme.muted
+                color: card.masked ? Theme.accent : Theme.muted
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
                 font.family: Theme.fontFamily
@@ -135,25 +144,37 @@ Rectangle {
         }
 
         // Action
-        ColumnLayout {
+        RowLayout {
             Layout.minimumWidth: 96
             Layout.alignment: Qt.AlignVCenter
-            spacing: 4
+            spacing: 6
 
             AppButton {
-                Layout.alignment: Qt.AlignRight
                 visible: card.live || (!card.finished && card.match && Model.preferredStream(card.match) !== null) || card.hasVod
                 text: card.hasVod ? (card.highlightsOnly ? "Highlights" : "Watch VOD") : "Watch"
-                accentuated: card.live
+                accentuated: card.live || card.queueHead
                 onClicked: card.watch()
+            }
+
+            AppButton {
+                visible: card.finished && card.match && card.match.followed && !card.watched
+                text: "Watched"
+                subtle: true
+                onClicked: card.markWatched()
+            }
+
+            AppButton {
+                visible: Model.tournamentUrl(card.match) !== ""
+                text: "Liquipedia"
+                subtle: true
+                onClicked: Qt.openUrlExternally(Model.tournamentUrl(card.match))
             }
 
             // Revealing is a deliberate act, so it gets its own control rather
             // than happening as a side effect of opening a video.
             AppButton {
-                Layout.alignment: Qt.AlignRight
-                visible: card.blacked
-                text: "Reveal result"
+                visible: card.blacked || card.masked
+                text: "Reveal"
                 subtle: true
                 onClicked: card.reveal()
             }

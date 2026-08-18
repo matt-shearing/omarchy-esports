@@ -30,6 +30,8 @@ Panel {
     property double nowMs: Date.now()
     property int focusIndex: 0
     property bool cursorActive: false
+    // Id of the row whose detail panel is open; empty means none.
+    property string expandedId: ""
 
     readonly property string home: (bar && bar.shell && bar.shell.home) ? bar.shell.home : ""
     readonly property string statePath: home + "/.local/state/omarchy-esports/state.json"
@@ -108,6 +110,22 @@ Panel {
 
     function refresh() { run(["refresh"]) }
     function revealMatch(id) { run(["reveal", id]) }
+    function markWatched(id) { run(["watched", id]) }
+
+    function openApp() {
+        Quickshell.execDetached(["omarchy-esports-app"])
+        root.close()
+    }
+
+    function openUrl(url) {
+        if (!url) return
+        Qt.openUrlExternally(url)
+        root.close()
+    }
+
+    function toggleExpanded(id) {
+        root.expandedId = (root.expandedId === id) ? "" : id
+    }
 
     function activate(m) {
         if (!m) return
@@ -123,7 +141,12 @@ Panel {
         }
     }
 
-    onOpenedChanged: if (opened) { stateFile.reload(); focusIndex = 0; cursorActive = false }
+    onOpenedChanged: if (opened) {
+        stateFile.reload()
+        focusIndex = 0
+        cursorActive = false
+        expandedId = ""
+    }
 
     // ---- bar button ----
     BarIconButton {
@@ -176,7 +199,7 @@ Panel {
             onActivateRequested: {
                 if (!root.cursorActive) return
                 var m = flatMatches[root.focusIndex]
-                if (m) root.activate(m)
+                if (m) root.toggleExpanded(m.id)
             }
             onCloseRequested: root.close()
             onTabRequested: function (direction) { root.switchPanel(direction) }
@@ -220,6 +243,17 @@ Panel {
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.caption
                     }
+
+                    Button {
+                        text: "󰏋 Open app"
+                        fontSize: Style.font.caption
+                        foreground: root.bar ? root.bar.foreground : Color.popups.text
+                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        horizontalPadding: Style.spacing.controlPaddingX
+                        verticalPadding: Style.spacing.controlPaddingY
+                        bordered: true
+                        onClicked: root.openApp()
+                    }
                 }
 
                 PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.popups.text }
@@ -228,7 +262,7 @@ Panel {
                 Text {
                     visible: !root.model.ok
                     Layout.fillWidth: true
-                    text: "Waiting for the esports daemon.\nRun: omarchy-esports refresh"
+                    text: "Waiting for the esports daemon.\n\nIf it is installed:  omarchy-esports refresh\nIf not:  github.com/matt-shearing/omarchy-esports"
                     color: root.bar ? root.bar.foreground : Color.popups.text
                     opacity: 0.6
                     wrapMode: Text.WordWrap
@@ -299,10 +333,14 @@ Panel {
                                 teams: root.model.teams
                                 darkTheme: root.darkTheme
                                 nowMs: root.nowMs
+                                expanded: root.expandedId === modelData.id
                                 hasCursor: root.cursorActive &&
                                     root.focusIndex === (parent.offset + index)
-                                onActivated: root.activate(modelData)
+                                onToggleRequested: root.toggleExpanded(modelData.id)
+                                onWatchRequested: root.activate(modelData)
                                 onRevealRequested: root.revealMatch(modelData.id)
+                                onWatchedRequested: root.markWatched(modelData.id)
+                                onOpenUrlRequested: function (url) { root.openUrl(url) }
                             }
                         }
                     }

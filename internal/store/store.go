@@ -46,15 +46,33 @@ type Public struct {
 
 // Private is the daemon's own record.
 type Private struct {
-	Version   int                  `json:"version"`
-	UpdatedAt time.Time            `json:"updatedAt"`
-	Matches   []match.Match        `json:"matches"`
-	Revealed  map[string]bool      `json:"revealed"`
-	Notified  map[string]time.Time `json:"notified"`
+	Version   int             `json:"version"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+	Matches   []match.Match   `json:"matches"`
+	Revealed  map[string]bool `json:"revealed"`
+	// Watched advances the catch-up queue: once a match is watched, the next
+	// unwatched one becomes the visible queue head.
+	Watched  map[string]bool      `json:"watched"`
+	Notified map[string]time.Time `json:"notified"`
+	// Teams is a cumulative index of every team seen in a ticker, used to power
+	// the app's follow-list search without extra API calls. It is kept across
+	// refreshes so it grows into a useful directory over time.
+	Teams map[string]TeamEntry `json:"teams"`
 	// TournamentStreams caches broadcast channels discovered from tournament
 	// pages, keyed by tournament page path. These are expensive to fetch
 	// (one rate-limited parse each) and change rarely.
 	TournamentStreams map[string]TournamentInfo `json:"tournamentStreams"`
+}
+
+// TeamEntry is one team in the searchable index.
+type TeamEntry struct {
+	Name     string     `json:"name"`
+	Short    string     `json:"short,omitempty"`
+	Page     string     `json:"page,omitempty"`
+	Logo     match.Logo `json:"logo,omitempty"`
+	Wiki     string     `json:"wiki,omitempty"`
+	Game     string     `json:"game,omitempty"`
+	LastSeen time.Time  `json:"lastSeen"`
 }
 
 // TournamentInfo is the cached result of scraping a tournament page.
@@ -119,7 +137,9 @@ func (s *Store) LoadPrivate() (Private, error) {
 	p := Private{
 		Version:           CurrentVersion,
 		Revealed:          map[string]bool{},
+		Watched:           map[string]bool{},
 		Notified:          map[string]time.Time{},
+		Teams:             map[string]TeamEntry{},
 		TournamentStreams: map[string]TournamentInfo{},
 	}
 	data, err := os.ReadFile(s.PrivatePath())
@@ -135,12 +155,20 @@ func (s *Store) LoadPrivate() (Private, error) {
 		return Private{
 			Version:           CurrentVersion,
 			Revealed:          map[string]bool{},
+			Watched:           map[string]bool{},
 			Notified:          map[string]time.Time{},
+			Teams:             map[string]TeamEntry{},
 			TournamentStreams: map[string]TournamentInfo{},
 		}, nil
 	}
 	if p.Revealed == nil {
 		p.Revealed = map[string]bool{}
+	}
+	if p.Watched == nil {
+		p.Watched = map[string]bool{}
+	}
+	if p.Teams == nil {
+		p.Teams = map[string]TeamEntry{}
 	}
 	if p.Notified == nil {
 		p.Notified = map[string]time.Time{}
@@ -205,6 +233,36 @@ func writeJSON(path string, v any, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// SetWatched records that the user has seen a match, advancing the catch-up
+// queue for whichever followed teams played in it.
+func (s *Store) SetWatched(id string, watched bool) error {
+	p, err := s.LoadPrivate()
+	if err != nil {
+		return err
+	}
+	if watched {
+		p.Watched[id] = true
+	} else {
+		delete(p.Watched, id)
+	}
+	return s.SavePrivate(p)
+}
+
+// TeamsPath is the searchable team index the app reads.
+func (s *Store) TeamsPath() string { return filepath.Join(s.dir, "teams.json") }
+
+// SaveTeams publishes the team index. Team names and artwork reveal no
+// results, so this file needs no redaction.
+func (s *Store) SaveTeams(teams []TeamEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sort.SliceStable(teams, func(i, j int) bool { return teams[i].Name < teams[j].Name })
+	return writeJSON(s.TeamsPath(), map[string]any{
+		"version": CurrentVersion,
+		"teams":   teams,
+	}, 0o644)
 }
 
 // SetRevealed records an explicit reveal and persists it.

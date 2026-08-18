@@ -197,3 +197,206 @@ function isFollowedTeam(opponent, teams) {
   }
   return false
 }
+
+// ---------------------------------------------------------------------------
+// Catch-up masking
+//
+// The daemon withholds the opponent of any match a followed team plays after
+// an unwatched one, because knowing who they face next reveals that they won.
+// The UI's job is only to render that absence honestly.
+// ---------------------------------------------------------------------------
+
+function isMasked(match) { return !!(match && match.masked) }
+
+function isHiddenOpponent(o) { return !!(o && o.hidden) }
+
+// opponentLabel renders a side, showing a placeholder when it was withheld.
+function opponentLabel(o) {
+  if (isHiddenOpponent(o)) return "?"
+  return opponentName(o)
+}
+
+function fullOpponentLabel(o) {
+  if (isHiddenOpponent(o)) return "Hidden until you catch up"
+  return fullName(o)
+}
+
+// maskExplanation says why a fixture is hidden, in the UI's own words.
+function maskExplanation(match) {
+  if (!isMasked(match)) return ""
+  var who = match.maskedFor || "a team you follow"
+  return "Opponent hidden until you catch up on " + who
+}
+
+// maskNote is the compact form, shown alongside the tournament rather than
+// replacing it, so a masked card keeps its context.
+function maskNote(match) {
+  return isMasked(match) ? "opponent hidden" : ""
+}
+
+// ---------------------------------------------------------------------------
+// Liquipedia links
+// ---------------------------------------------------------------------------
+
+var LIQUIPEDIA = "https://liquipedia.net"
+
+function absoluteUrl(path) {
+  if (!path) return ""
+  if (path.indexOf("http") === 0) return path
+  return LIQUIPEDIA + path
+}
+
+function tournamentUrl(match) {
+  return match && match.tournament ? absoluteUrl(match.tournament.page) : ""
+}
+
+function opponentUrl(o) {
+  if (!o || o.hidden) return ""
+  return absoluteUrl(o.page)
+}
+
+// matchUrl is the best page to read about a fixture. Liquipedia has no stable
+// per-match page for ticker entries, so the tournament page is the target.
+function matchUrl(match) { return tournamentUrl(match) }
+
+// ---------------------------------------------------------------------------
+// VODs and the catch-up queue
+// ---------------------------------------------------------------------------
+
+function hasVod(match) { return !!(match && match.vod && match.vod.videoId) }
+
+function isHighlightVod(match) {
+  return hasVod(match) && match.vod.kind === "highlights"
+}
+
+function vodUrl(match) {
+  if (!hasVod(match)) return ""
+  return match.vod.url || ("https://www.youtube.com/watch?v=" + match.vod.videoId)
+}
+
+// vodSections splits recorded matches into the catch-up queue and the archive.
+//
+// The queue mirrors what the daemon actually computed: a match is in it only
+// if the daemon marked it as a queue head or masked it, which happens only
+// inside the configured catch-up window. Listing every unwatched match a
+// followed team ever played would bury the two or three that matter.
+//
+// The queue is ordered oldest first, because watching out of order is exactly
+// what spoils a bracket.
+function vodSections(matches) {
+  var queue = [], rest = []
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i]
+    if (!isFinished(m)) continue
+    if (m.queueHead === true || isMasked(m)) queue.push(m)
+    else if (hasVod(m)) rest.push(m)
+  }
+  queue.sort(function (a, b) { return startMs(a) - startMs(b) })
+  rest.sort(function (a, b) { return startMs(b) - startMs(a) })
+  return { queue: queue, rest: rest }
+}
+
+// teamMatches returns everything involving a team, upcoming first.
+function teamMatches(matches, teamName) {
+  var name = String(teamName || "").toLowerCase().trim()
+  if (!name) return { upcoming: [], past: [] }
+  var upcoming = [], past = []
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i]
+    var hit = false
+    for (var j = 0; j < 2; j++) {
+      var o = m.opponents[j]
+      if (isHiddenOpponent(o)) continue
+      if (String(o.name || "").toLowerCase().trim() === name ||
+          String(o.short || "").toLowerCase().trim() === name) hit = true
+    }
+    if (!hit) continue
+    if (isFinished(m)) past.push(m); else upcoming.push(m)
+  }
+  upcoming.sort(function (a, b) { return startMs(a) - startMs(b) })
+  past.sort(function (a, b) { return startMs(b) - startMs(a) })
+  return { upcoming: upcoming, past: past }
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy team search
+//
+// Mirrors internal/fuzzy in Go. It runs in-process so results appear while
+// typing rather than after spawning the CLI on every keystroke.
+// ---------------------------------------------------------------------------
+
+var NO_MATCH = -1
+
+function fuzzyScore(query, target) {
+  var q = String(query || "").toLowerCase().trim()
+  var t = String(target || "").toLowerCase().trim()
+  if (!q || !t) return NO_MATCH
+  if (q === t) return 1000
+  if (t.indexOf(q) === 0) return 800 - Math.min(t.length - q.length, 99)
+  if (wordPrefix(t, q)) return 600 - Math.min(t.length - q.length, 99)
+  if (t.indexOf(q) >= 0) return 400 - Math.min(t.length - q.length, 99)
+  var spread = subsequenceSpread(t, q)
+  if (spread >= 0) return 200 - Math.min(spread, 199)
+  return NO_MATCH
+}
+
+function wordPrefix(target, query) {
+  var words = target.split(/[\s._-]+/)
+  for (var i = 0; i < words.length; i++) {
+    if (words[i].indexOf(query) === 0) return true
+  }
+  return false
+}
+
+function subsequenceSpread(target, query) {
+  var ti = 0, first = -1, last = -1
+  for (var qi = 0; qi < query.length; qi++) {
+    var found = false
+    while (ti < target.length) {
+      if (target.charAt(ti) === query.charAt(qi)) {
+        if (first < 0) first = ti
+        last = ti
+        ti++
+        found = true
+        break
+      }
+      ti++
+    }
+    if (!found) return -1
+  }
+  return (last - first + 1) - query.length
+}
+
+// searchTeams ranks the index against a query. minChars keeps the list from
+// flashing up the entire directory on the first keystroke.
+function searchTeams(index, query, opts) {
+  opts = opts || {}
+  var minChars = opts.minChars === undefined ? 2 : opts.minChars
+  var limit = opts.limit || 12
+  var q = String(query || "").trim()
+  if (q.length < minChars) return []
+
+  var hits = []
+  for (var i = 0; i < index.length; i++) {
+    var t = index[i]
+    var score = Math.max(fuzzyScore(q, t.name), fuzzyScore(q, t.short || ""))
+    if (score === NO_MATCH) continue
+    hits.push({ team: t, score: score })
+  }
+  hits.sort(function (a, b) {
+    if (b.score !== a.score) return b.score - a.score
+    return String(a.team.name).localeCompare(String(b.team.name))
+  })
+  return hits.slice(0, limit).map(function (h) { return h.team })
+}
+
+// parseTeamIndex decodes teams.json defensively.
+function parseTeamIndex(text) {
+  if (!text || !String(text).trim()) return []
+  try {
+    var doc = JSON.parse(text)
+    return Array.isArray(doc.teams) ? doc.teams : []
+  } catch (e) {
+    return []
+  }
+}
