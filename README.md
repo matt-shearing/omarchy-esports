@@ -12,8 +12,10 @@ any other Liquipedia wiki you add.
 ## What it does
 
 - **Bar widget** — the next match for a team you follow, with a live countdown.
-  Click for a panel of live / upcoming / recent matches.
-- **App** — a fuller view with team artwork, tabs, and follow-list management.
+  Click any match for an inline detail panel with stream links, the VOD, and
+  links to the relevant Liquipedia pages. A button opens the full app.
+- **App** — schedule, a catch-up queue of what you still have to watch, VODs,
+  fuzzy team search with logos, and a per-team view of upcoming fixtures.
 - **Spoiler-free by construction** — see below. This is the point of the thing.
 - **Stream links** — resolved from the tournament's broadcast table, so a match
   card can send you straight to the right Twitch channel.
@@ -25,7 +27,7 @@ any other Liquipedia wiki you add.
 ## Install
 
 ```bash
-git clone https://github.com/contra/omarchy-esports
+git clone https://github.com/matt-shearing/omarchy-esports
 cd omarchy-esports
 ./install.sh
 ```
@@ -107,6 +109,49 @@ Scorelines are the obvious leak. The subtler ones this also catches:
 Three policies: `strict` (default), `balanced`, `off`. Set `spoilers` in
 `~/.config/omarchy-esports/config.json`.
 
+### Catch-up masking: the spoiler hiding in your own schedule
+
+Hiding scores is not enough once you are behind.
+
+Say you follow Team Spirit, they played three matches yesterday, and you have
+watched none of them. Listing all three tells you they kept winning. Worse,
+their *next* fixture is itself the spoiler: if the schedule says they play in
+tomorrow's Upper Bracket Final, you already know how yesterday went.
+
+So for each followed team, the earliest unwatched finished match is the **queue
+head** and is shown in full — it is the one to watch next. Every later match
+that team plays, finished or upcoming, has the **opponent withheld**, along
+with the score and the bracket stage:
+
+```
+CATCH UP
+  ended  Thu 13 Aug   Team Spirit   vs   JiJieHao      ← queue head, full detail
+  ended  Thu 13 Aug   Team Spirit   vs   ? Hidden      ← opponent withheld
+  18:00  Fri 14 Aug   Team Spirit   vs   ? Hidden      ← upcoming, also withheld
+```
+
+You still see that a match exists and when it starts, so the schedule stays
+useful; you cannot work out the result of the one you have not watched.
+
+Marking one watched — or just opening its VOD — advances the queue and reveals
+the next opponent. As with everything else here, the withheld opponent is
+absent from the published state file, not merely undrawn.
+
+Details worth knowing:
+
+- **Queues are scoped per team per wiki.** An org like Team Spirit fields
+  separate Dota 2 and Counter-Strike rosters; being behind on one says nothing
+  about the other, so a Dota backlog never masks their CS fixtures.
+- **The tournament stage is stripped** on a masked fixture, because
+  "TI 2026 — Upper Bracket Final" says more about yesterday than the fixture
+  does. You see "TI 2026".
+- **A backlog expires.** `catchUp.window` (default 48h) bounds how far back an
+  unwatched match still counts, so a match you skipped last month does not hide
+  your schedule forever.
+- If two followed teams meet and both are behind, **both** sides are withheld.
+- `omarchy-esports reveal <id>` overrides it per match, and
+  `catchUp.enabled: false` turns it off entirely.
+
 ## How the data works
 
 Everything is keyless. No account, no API key, no quota.
@@ -162,6 +207,10 @@ omarchy-esports teams add "NAVI"
 omarchy-esports teams remove "NAVI"
 omarchy-esports reveal <id>         # unblind one result
 omarchy-esports hide <id>           # re-blind it
+omarchy-esports watched <id>        # advance the catch-up queue
+omarchy-esports unwatch <id>
+omarchy-esports search spir         # fuzzy-search the team index
+omarchy-esports team "Team Spirit"  # one team's fixtures
 omarchy-esports open <id> --stream  # open the stream
 omarchy-esports open <id> --vod     # open the VOD
 omarchy-esports refresh             # force a poll
@@ -170,6 +219,17 @@ omarchy-esports config edit
 
 Team names are matched case-insensitively against both Liquipedia's canonical
 name and the ticker abbreviation, so `NAVI` and `Natus Vincere` both work.
+
+### Finding teams
+
+The app's Teams tab searches as you type, from two characters, showing each
+team's logo and game. The index is built from every team seen in a ticker, so
+it costs no extra API calls, works offline, and naturally covers the teams that
+are actually competing — it grows as more fixtures come through.
+
+Ranking prefers exact matches, then prefixes, then word prefixes, then
+substrings, and finally subsequences, so `spir` finds Team Spirit before Team
+Spirit Academy, and `navi` finds Natus Vincere by its abbreviation.
 
 ## Configuration
 
@@ -184,6 +244,10 @@ name and the ticker abbreviation, so `NAVI` and `Natus Vincere` both work.
     { "slug": "starcraft2",    "game": "StarCraft II",  "tickerPage": "Main_Page",          "enabled": true }
   ],
   "spoilers": "strict",        // strict | balanced | off
+  "catchUp": {
+    "enabled": true,           // withhold opponents while you are behind
+    "window": "48h0m0s"        // how far back an unwatched match counts
+  },
   "followedOnly": false,       // restrict the ticker to your teams
   "hideTBD": true,             // drop unseeded bracket slots
   "horizon": "336h0m0s",       // how far ahead to track
@@ -221,6 +285,7 @@ internal/liquipedia/     rate-limited API client, ticker + tournament parsers
 internal/youtube/        keyless RSS VOD discovery and match association
 internal/spoiler/        redaction engine and leak detection
 internal/store/          the two-file public/private state split
+internal/fuzzy/          team-search ranking (mirrored in shared/Model.js)
 internal/daemon/         polling, enrichment, notifications
 internal/config/         user configuration
 shared/Model.js          formatting logic shared by widget and app
@@ -235,7 +300,7 @@ copy in `shared/`.
 ## Development
 
 ```bash
-go test ./...                       # 34 tests, incl. real captured Liquipedia HTML
+go test ./...                       # real captured Liquipedia HTML, masking rules, redaction
 DEV_LINK=1 ./install.sh             # symlink the plugin from this checkout
 omarchy restart shell               # reload after a plugin edit
 journalctl -t omarchy-shell -f      # QML errors
@@ -258,6 +323,14 @@ Two things that will cost you an hour if you do not know them:
   them is zero-width and simply never appears — with no error to tell you why.
   And do not `anchors.fill: parent` the layout you derive that size from, or the
   two will wait on each other and every column collapses onto the same x.
+
+## Publishing the plugin
+
+`./package-plugin.sh` builds the standalone tree the community catalog needs.
+`omarchy plugin add` clones a repo and only ever validates `manifest.json` at
+the **repository root**, so the plugin cannot be published from its
+subdirectory here. See [docs/PUBLISHING.md](docs/PUBLISHING.md) for the
+submission process, the plugin-id decision, and the pre-submission checklist.
 
 ## Licence
 

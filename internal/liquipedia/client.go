@@ -42,7 +42,7 @@ const (
 	// otherInterval is the floor for every other action.
 	otherInterval = 2 * time.Second
 	// userAgentTmpl embeds the contact address the terms of use require.
-	userAgentTmpl = "omarchy-esports/%s (https://github.com/contra/omarchy-esports; %s) go-http"
+	userAgentTmpl = "omarchy-esports/%s (https://github.com/matt-shearing/omarchy-esports; %s) go-http"
 )
 
 // Client is a rate-limited, gzip-speaking Liquipedia API client.
@@ -66,7 +66,7 @@ func New(version, contact, cacheDir string) *Client {
 	if strings.TrimSpace(contact) == "" {
 		// Still identifies the software and gives maintainers somewhere to
 		// look, which is better than a generic Go user agent.
-		contact = "https://github.com/contra/omarchy-esports/issues"
+		contact = "https://github.com/matt-shearing/omarchy-esports/issues"
 	}
 	return &Client{
 		http:     &http.Client{Timeout: 45 * time.Second},
