@@ -125,12 +125,17 @@ function preferredStream(match) {
 }
 
 // logoFor picks the artwork variant matching the active theme.
+//
+// The daemon rewrites these to file:// paths once it has cached the artwork
+// locally. Pointing Image elements straight at liquipedia.net meant every
+// panel open fired dozens of requests for files that never change, which
+// eventually earned HTTP 429 and blank logos.
 function logoFor(opponent, darkTheme) {
   if (!opponent || !opponent.logo) return ""
   var l = opponent.logo
   if (darkTheme && l.dark) return l.dark
   if (!darkTheme && l.light) return l.light
-  return l.light || l.dark || ""
+  return l.light || l.dark || l.local || ""
 }
 
 // sections groups matches for display: live first, then upcoming by day, then

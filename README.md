@@ -175,6 +175,19 @@ fetched once and cached hard.
 That same page yields the event's YouTube channel ids, which feed the
 `/feeds/videos.xml` RSS endpoint — no key, no quota — to find VODs afterwards.
 
+### Team artwork is cached locally
+
+Logos are downloaded once into `~/.cache/omarchy-esports/logos/` and served
+from disk. The UI originally pointed `Image` elements straight at
+liquipedia.net, which meant every panel open fired dozens of requests for files
+that never change — enough that Liquipedia began replying **HTTP 429** and
+logos silently stopped rendering.
+
+Caching fixes the rendering, matches their "cache rather than re-request"
+terms, and makes artwork work offline. A 429 pauses downloads for 30 minutes
+rather than retrying; artwork is decoration, and continuing to ask while being
+told to stop is both rude and pointless.
+
 ### Playing nicely with Liquipedia
 
 Liquipedia's [API terms](https://liquipedia.net/api-terms-of-use) are strict and

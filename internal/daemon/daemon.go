@@ -41,6 +41,10 @@ type Daemon struct {
 	// file, and a daemon holding a startup snapshot would silently ignore them.
 	configModTime time.Time
 
+	// logos caches team artwork on disk so the UI never fetches from
+	// liquipedia.net directly.
+	logos *liquipedia.LogoCache
+
 	// mu serialises state mutation. The first refresh runs concurrently with
 	// the tick loop, so both paths can reach the store at once.
 	mu sync.Mutex
@@ -74,6 +78,7 @@ func New(o Options) *Daemon {
 		cfg:                  o.Config,
 		configModTime:        modTime,
 		lp:                   liquipedia.New(o.Version, o.Config.ContactEmail, store.CacheDir()),
+		logos:                liquipedia.NewLogoCache(store.CacheDir()),
 		yt:                   youtube.New(15 * time.Minute),
 		store:                o.Store,
 		notifier:             notifier,
@@ -179,6 +184,7 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	d.indexTeams(all, &priv)
 	d.sweepDirectories(ctx, &priv)
 	d.fetchMissingLogos(ctx, &priv)
+	d.cacheLogos(ctx, all, &priv)
 
 	priv.Matches = all
 	priv.UpdatedAt = time.Now()
@@ -443,6 +449,78 @@ var minorEventTypes = map[string]bool{
 
 func isMinorEvent(tierType string) bool {
 	return minorEventTypes[strings.ToLower(strings.TrimSpace(tierType))]
+}
+
+// maxLogoDownloads bounds artwork downloads per refresh. Logos never change,
+// so this only applies to teams seen for the first time.
+const maxLogoDownloads = 60
+
+// cacheLogos downloads team artwork to disk and rewrites each logo to point at
+// the local copy.
+//
+// Without this the UI pointed Image elements straight at liquipedia.net, so
+// every panel open fired dozens of requests for files that never change —
+// enough that Liquipedia began replying 429 and logos stopped rendering.
+// Caching fixes the rendering, respects their "cache rather than re-request"
+// terms, and makes artwork work offline.
+func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.Private) {
+	if d.logos.BackingOff() {
+		return
+	}
+	ua := d.lp.UserAgent()
+	downloads := 0
+
+	localise := func(l *match.Logo) {
+		for _, remote := range []string{l.Light, l.Dark} {
+			if remote == "" || d.logos.Has(remote) {
+				continue
+			}
+			if downloads >= maxLogoDownloads {
+				return
+			}
+			if _, err := d.logos.Fetch(ctx, remote, ua); err != nil {
+				if errors.Is(err, liquipedia.ErrBackoff) {
+					return // stop the whole sweep, not just this file
+				}
+				d.logger.Printf("logo cache: %v", err)
+				continue
+			}
+			downloads++
+		}
+		// Point at whichever variants are cached; the UI falls back to the
+		// remote URL when Local is empty.
+		if d.logos.Has(l.Light) {
+			l.Local = d.logos.Path(l.Light)
+		} else if d.logos.Has(l.Dark) {
+			l.Local = d.logos.Path(l.Dark)
+		}
+		if d.logos.Has(l.Light) {
+			l.Light = "file://" + d.logos.Path(l.Light)
+		}
+		if d.logos.Has(l.Dark) {
+			l.Dark = "file://" + d.logos.Path(l.Dark)
+		}
+	}
+
+	for i := range ms {
+		for j := range ms[i].Opponents {
+			localise(&ms[i].Opponents[j].Logo)
+		}
+	}
+	// The team index feeds search results, which render the same artwork.
+	for k, e := range priv.Teams {
+		if e.Logo.Light == "" && e.Logo.Dark == "" {
+			continue
+		}
+		if strings.HasPrefix(e.Logo.Light, "file://") {
+			continue
+		}
+		localise(&e.Logo)
+		priv.Teams[k] = e
+	}
+	if downloads > 0 {
+		d.logger.Printf("logo cache: downloaded %d file(s)", downloads)
+	}
 }
 
 // maxLogoFetches bounds how many team logos one refresh may fetch.
