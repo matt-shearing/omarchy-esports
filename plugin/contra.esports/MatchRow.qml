@@ -31,7 +31,37 @@ Rectangle {
     readonly property bool blacked: match ? (match.redacted === true) : false
     readonly property bool masked: match ? Model.isMasked(match) : false
 
-    implicitHeight: body.implicitHeight + Style.space(14)
+    // The kickoff line is rendered once here so `facts` below can depend on
+    // the string rather than on nowMs: the panel's one-second clock would
+    // otherwise hand the Repeater a fresh model array every tick and rebuild
+    // every delegate for a label that changes at most once a day.
+    readonly property string whenLabel: match
+        ? Model.dayLabel(match, nowMs) + " " + Model.clockTime(match)
+        : ""
+
+    // Detail lines as label/value data, so every open row lines its values up
+    // on one column and a field the daemon did not supply drops its whole line
+    // instead of leaving a dangling separator in a run-on string.
+    readonly property var facts: {
+        if (!match) return []
+        var out = [{ label: "When", value: whenLabel }]
+        if (Model.bestOfLabel(match)) out.push({ label: "Format", value: Model.bestOfLabel(match) })
+        if (match.game) out.push({ label: "Game", value: match.game })
+        out.push({ label: "Event", value: match.tournament.name })
+        return out
+    }
+
+    // Shared by the summary's clock column and the detail's label column, so
+    // the open block's values start on the same edge as the team badges above
+    // them instead of drifting when either width is tweaked.
+    readonly property int gutter: Style.space(52)
+
+    // A collapsed row stays dense so the list packs; an open one reads as a
+    // card, so its vertical padding grows to match the horizontal margin
+    // `body` already uses and the block sits evenly inside its own fill.
+    readonly property int padY: expanded ? Style.space(10) : Style.space(7)
+
+    implicitHeight: body.implicitHeight + padY * 2
     radius: Style.cornerRadius
     color: expanded ? Style.selectedFill
         : (hasCursor || hover.hovered ? Style.hoverFill : "transparent")
@@ -66,7 +96,7 @@ Rectangle {
             spacing: Style.space(10)
 
             ColumnLayout {
-                Layout.preferredWidth: Style.space(52)
+                Layout.preferredWidth: row.gutter
                 Layout.alignment: Qt.AlignVCenter
                 spacing: 0
 
@@ -126,6 +156,11 @@ Rectangle {
             }
 
             ColumnLayout {
+                // A Layout never shrinks a child that does not fill, so
+                // without this the tournament block held its full width on a
+                // narrow panel and pushed the trailing icon off the card.
+                // The maximum still caps it once there is room to spare.
+                Layout.fillWidth: true
                 Layout.maximumWidth: Style.space(150)
                 Layout.alignment: Qt.AlignVCenter
                 spacing: 0
@@ -204,11 +239,17 @@ Rectangle {
         // ---- expandable detail ----
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.topMargin: Style.space(4)
+            Layout.topMargin: Style.space(2)
             visible: row.expanded
-            spacing: Style.space(6)
+            spacing: Style.space(8)
 
-            PanelSeparator { foreground: row.fg }
+            // A Layout hands out width imperatively, which overwrites the
+            // parent-width binding PanelSeparator carries; without fillWidth
+            // the rule draws at its 100px implicit width and reads as a stub.
+            PanelSeparator {
+                Layout.fillWidth: true
+                foreground: row.fg
+            }
 
             Text {
                 Layout.fillWidth: true
@@ -224,22 +265,42 @@ Rectangle {
                 font.pixelSize: Style.font.bodySmall
             }
 
-            Text {
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: {
-                    if (!row.match) return ""
-                    var bits = []
-                    bits.push(Model.dayLabel(row.match, row.nowMs) + " " + Model.clockTime(row.match))
-                    if (Model.bestOfLabel(row.match)) bits.push(Model.bestOfLabel(row.match))
-                    if (row.match.game) bits.push(row.match.game)
-                    bits.push(row.match.tournament.name)
-                    return bits.join("  ·  ")
+                spacing: Style.space(3)
+
+                Repeater {
+                    model: row.facts
+
+                    RowLayout {
+                        id: fact
+
+                        required property var modelData
+
+                        Layout.fillWidth: true
+                        spacing: Style.space(10)
+
+                        Text {
+                            Layout.preferredWidth: row.gutter
+                            Layout.alignment: Qt.AlignTop
+                            text: fact.modelData.label
+                            color: row.fg
+                            opacity: 0.4
+                            font.family: row.bar ? row.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: fact.modelData.value
+                            color: row.fg
+                            opacity: 0.75
+                            wrapMode: Text.WordWrap
+                            font.family: row.bar ? row.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                        }
+                    }
                 }
-                color: row.fg
-                opacity: 0.6
-                wrapMode: Text.WordWrap
-                font.family: row.bar ? row.bar.fontFamily : Style.font.family
-                font.pixelSize: Style.font.caption
             }
 
             // Explains a blackout instead of leaving the user guessing.
@@ -257,10 +318,10 @@ Rectangle {
 
             Flow {
                 Layout.fillWidth: true
-                spacing: Style.space(6)
+                spacing: Style.spacing.controlGap
 
                 Button {
-                    visible: row.match && Model.preferredStream(row.match) !== null
+                    visible: !!(row.match && Model.preferredStream(row.match))
                     text: "󰐊 Watch"
                     fontSize: Style.font.caption
                     foreground: row.fg
@@ -321,7 +382,10 @@ Rectangle {
 
                 Button {
                     visible: !!row.match && Model.opponentUrl(row.match.opponents[0]) !== ""
-                    text: Model.opponentName(row.match ? row.match.opponents[0] : null)
+                    // Flow can wrap between buttons but not inside one, so a
+                    // team with no short name is capped rather than allowed to
+                    // grow a button wider than a narrow panel.
+                    text: Model.truncate(Model.opponentName(row.match ? row.match.opponents[0] : null), 20)
                     fontSize: Style.font.caption
                     foreground: row.fg
                     fontFamily: row.bar ? row.bar.fontFamily : Style.font.family
@@ -333,7 +397,7 @@ Rectangle {
 
                 Button {
                     visible: !!row.match && Model.opponentUrl(row.match.opponents[1]) !== ""
-                    text: Model.opponentName(row.match ? row.match.opponents[1] : null)
+                    text: Model.truncate(Model.opponentName(row.match ? row.match.opponents[1] : null), 20)
                     fontSize: Style.font.caption
                     foreground: row.fg
                     fontFamily: row.bar ? row.bar.fontFamily : Style.font.family
