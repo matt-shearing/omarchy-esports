@@ -101,7 +101,7 @@ Rectangle {
                     opponent: row.match ? row.match.opponents[0] : null
                     darkTheme: row.darkTheme
                     bar: row.bar
-                    followed: Model.isFollowedTeam(row.match ? row.match.opponents[0] : null, row.teams)
+                    followed: Model.isFollowedTeam(row.match ? row.match.opponents[0] : null, row.teams, row.match ? row.match.wiki : "")
                 }
 
                 Text {
@@ -117,7 +117,7 @@ Rectangle {
                     opponent: row.match ? row.match.opponents[1] : null
                     darkTheme: row.darkTheme
                     bar: row.bar
-                    followed: Model.isFollowedTeam(row.match ? row.match.opponents[1] : null, row.teams)
+                    followed: Model.isFollowedTeam(row.match ? row.match.opponents[1] : null, row.teams, row.match ? row.match.wiki : "")
                 }
 
                 Item { Layout.fillWidth: true }

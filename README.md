@@ -210,7 +210,11 @@ omarchy-esports hide <id>           # re-blind it
 omarchy-esports watched <id>        # advance the catch-up queue
 omarchy-esports unwatch <id>
 omarchy-esports search spir         # fuzzy-search the team index
+omarchy-esports search gamer --game dota2
 omarchy-esports team "Team Spirit"  # one team's fixtures
+omarchy-esports config set spoilers balanced
+omarchy-esports config set catchUp.window 72h
+omarchy-esports config wiki starcraft2 off
 omarchy-esports open <id> --stream  # open the stream
 omarchy-esports open <id> --vod     # open the VOD
 omarchy-esports refresh             # force a poll
@@ -220,16 +224,60 @@ omarchy-esports config edit
 Team names are matched case-insensitively against both Liquipedia's canonical
 name and the ticker abbreviation, so `NAVI` and `Natus Vincere` both work.
 
-### Finding teams
+### Finding teams, and following one game not another
 
 The app's Teams tab searches as you type, from two characters, showing each
-team's logo and game. The index is built from every team seen in a ticker, so
-it costs no extra API calls, works offline, and naturally covers the teams that
-are actually competing — it grows as more fixtures come through.
+team's logo and game, with filter chips for each game. The index is built from
+every team seen in a ticker, so it costs no extra API calls, works offline, and
+naturally covers the teams that are actually competing.
+
+**Orgs are indexed per game, not per name.** GamerLegion, NAVI, Team Spirit,
+Team Falcons and Aurora Gaming all field rosters in more than one wiki, so each
+appears once per game with its own artwork and its own follow state:
+
+```bash
+omarchy-esports search gamer
+# TEAM         SHORT  GAME            WIKI           FOLLOWED
+# GamerLegion  GL     Counter-Strike  counterstrike
+# GamerLegion  GL     Dota 2          dota2          *
+
+omarchy-esports teams add "GamerLegion" --game dota2   # their Dota roster only
+omarchy-esports teams add "Team Spirit"                # every game
+```
+
+A scoped entry only matches fixtures from that wiki — including for
+notifications and catch-up masking, so being behind on GamerLegion's Dota
+matches never hides their Counter-Strike ones. In the config the two forms sit
+side by side:
+
+```jsonc
+"teams": ["Team Spirit", { "name": "GamerLegion", "wiki": "dota2" }]
+```
 
 Ranking prefers exact matches, then prefixes, then word prefixes, then
 substrings, and finally subsequences, so `spir` finds Team Spirit before Team
 Spirit Academy, and `navi` finds Natus Vincere by its abbreviation.
+
+## Settings
+
+The app has a Settings tab covering the blackout policy, catch-up masking and
+its window, which games to poll, the notification toggles, and the refresh
+interval. Every control writes through the CLI rather than editing the file
+directly, so validation and clamping happen in one place — setting a poll
+interval below the floor, or a malformed duration, is rejected rather than
+silently corrected later.
+
+The same settings from a terminal:
+
+```bash
+omarchy-esports config set spoilers balanced
+omarchy-esports config set catchUp.enabled false
+omarchy-esports config set notifications.vodReady false
+omarchy-esports config wiki starcraft2 off
+omarchy-esports config show
+```
+
+The daemon notices config changes within about 30 seconds — no restart.
 
 ## Configuration
 

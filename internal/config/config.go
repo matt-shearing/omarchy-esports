@@ -54,11 +54,62 @@ type Notifications struct {
 	Quiet bool `json:"quiet"`
 }
 
+// Follow is one entry on the follow list: a team, optionally scoped to a
+// single game.
+//
+// Orgs field rosters in several games — GamerLegion, NAVI, Team Spirit and
+// Team Falcons all appear in both the Counter-Strike and Dota 2 wikis — and
+// following the org by name alone cannot express "their Dota roster, not their
+// CS one". An empty Wiki means every game, which is what a bare string in the
+// config file decodes to.
+type Follow struct {
+	Name string `json:"name"`
+	Wiki string `json:"wiki,omitempty"`
+}
+
+// UnmarshalJSON accepts either a bare string or an object, so existing configs
+// keep working and the game-scoped form is opt-in:
+//
+//	"teams": ["Team Spirit", {"name": "GamerLegion", "wiki": "dota2"}]
+func (f *Follow) UnmarshalJSON(b []byte) error {
+	var name string
+	if err := json.Unmarshal(b, &name); err == nil {
+		f.Name, f.Wiki = name, ""
+		return nil
+	}
+	// Alias avoids recursing back into this method.
+	type raw Follow
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return fmt.Errorf("invalid team entry %s: %w", string(b), err)
+	}
+	*f = Follow(r)
+	return nil
+}
+
+// MarshalJSON writes the bare string form when the entry is not game-scoped,
+// so a config edited by hand stays readable.
+func (f Follow) MarshalJSON() ([]byte, error) {
+	if f.Wiki == "" {
+		return json.Marshal(f.Name)
+	}
+	type raw Follow
+	return json.Marshal(raw(f))
+}
+
+// Label renders the entry for display, e.g. "GamerLegion (dota2)".
+func (f Follow) Label() string {
+	if f.Wiki == "" {
+		return f.Name
+	}
+	return f.Name + " (" + f.Wiki + ")"
+}
+
 // Config is the whole user configuration.
 type Config struct {
 	// Teams is the follow list. Names are matched case-insensitively against
 	// both canonical Liquipedia names and ticker abbreviations.
-	Teams []string `json:"teams"`
+	Teams []Follow `json:"teams"`
 
 	// Wikis are the Liquipedia wikis to poll.
 	Wikis []Wiki `json:"wikis"`
@@ -129,7 +180,7 @@ const MinPollInterval = 5 * time.Minute
 // Default returns the shipped configuration.
 func Default() Config {
 	return Config{
-		Teams: []string{},
+		Teams: []Follow{},
 		Wikis: []Wiki{
 			{Slug: "dota2", Game: "Dota 2", TickerPage: "Liquipedia:Matches", Enabled: true},
 			{Slug: "counterstrike", Game: "Counter-Strike", TickerPage: "Liquipedia:Matches", Enabled: true},
@@ -242,12 +293,48 @@ func (c Config) EnabledWikis() []Wiki {
 	return out
 }
 
-// Follows reports whether a team name is on the follow list.
-func (c Config) Follows(name string) bool {
+// Follows reports whether a team is followed in the given wiki. An empty wiki
+// asks "followed in any game?".
+func (c Config) Follows(name, wiki string) bool {
 	name = strings.ToLower(strings.TrimSpace(name))
 	for _, t := range c.Teams {
-		if strings.ToLower(strings.TrimSpace(t)) == name {
+		if strings.ToLower(strings.TrimSpace(t.Name)) != name {
+			continue
+		}
+		// An unscoped entry follows the team everywhere.
+		if t.Wiki == "" || wiki == "" || strings.EqualFold(t.Wiki, wiki) {
 			return true
+		}
+	}
+	return false
+}
+
+// FollowIndex returns the position of an exact (name, wiki) entry, or -1.
+func (c Config) FollowIndex(name, wiki string) int {
+	for i, t := range c.Teams {
+		if strings.EqualFold(strings.TrimSpace(t.Name), strings.TrimSpace(name)) &&
+			strings.EqualFold(t.Wiki, wiki) {
+			return i
+		}
+	}
+	return -1
+}
+
+// TeamNames returns the follow list as plain names, for the paths that only
+// need to know which teams matter.
+func (c Config) TeamNames() []string {
+	out := make([]string, 0, len(c.Teams))
+	for _, t := range c.Teams {
+		out = append(out, t.Name)
+	}
+	return out
+}
+
+// WikiEnabled reports whether a wiki slug is configured and enabled.
+func (c Config) WikiEnabled(slug string) bool {
+	for _, w := range c.Wikis {
+		if strings.EqualFold(w.Slug, slug) {
+			return w.Enabled
 		}
 	}
 	return false

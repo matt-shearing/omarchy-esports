@@ -184,18 +184,48 @@ function truncate(s, n) {
   return s.substring(0, n - 1) + "…"
 }
 
-// isFollowedTeam reports whether a specific opponent is on the follow list,
-// so the UI can emphasise the side the user actually cares about rather than
-// both sides of a followed fixture.
-function isFollowedTeam(opponent, teams) {
+// isFollowedTeam reports whether a specific opponent is on the follow list, so
+// the UI can emphasise the side the user actually cares about rather than both
+// sides of a followed fixture.
+//
+// Follow entries carry an optional game scope: an org can be followed in Dota
+// but not Counter-Strike, so the match's wiki decides whether a scoped entry
+// applies.
+function isFollowedTeam(opponent, teams, wiki) {
   if (!opponent || !teams || !teams.length) return false
   var name = String(opponent.name || "").toLowerCase().trim()
   var short = String(opponent.short || "").toLowerCase().trim()
+  if (!name && !short) return false
   for (var i = 0; i < teams.length; i++) {
-    var t = String(teams[i] || "").toLowerCase().trim()
-    if (t && (t === name || t === short)) return true
+    var t = teams[i]
+    var tn = String((t && t.name !== undefined) ? t.name : t).toLowerCase().trim()
+    if (!tn || (tn !== name && tn !== short)) continue
+    var scope = (t && t.wiki) ? String(t.wiki).toLowerCase() : ""
+    if (!scope || !wiki || scope === String(wiki).toLowerCase()) return true
   }
   return false
+}
+
+// followLabel renders a follow entry, e.g. "GamerLegion (Dota 2)".
+function followLabel(entry) {
+  if (!entry) return ""
+  var name = (entry.name !== undefined) ? entry.name : entry
+  var game = entry.game || entry.wiki || ""
+  return game ? name + " (" + game + ")" : String(name)
+}
+
+// gamesInIndex lists the distinct games present in the team index, for the
+// search filter chips.
+function gamesInIndex(index) {
+  var seen = {}, out = []
+  for (var i = 0; i < index.length; i++) {
+    var t = index[i]
+    if (!t.wiki || seen[t.wiki]) continue
+    seen[t.wiki] = true
+    out.push({ wiki: t.wiki, game: t.game || t.wiki })
+  }
+  out.sort(function (a, b) { return String(a.game).localeCompare(String(b.game)) })
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -297,12 +327,14 @@ function vodSections(matches) {
 }
 
 // teamMatches returns everything involving a team, upcoming first.
-function teamMatches(matches, teamName) {
+function teamMatches(matches, teamName, wiki) {
   var name = String(teamName || "").toLowerCase().trim()
   if (!name) return { upcoming: [], past: [] }
+  var scope = String(wiki || "").toLowerCase()
   var upcoming = [], past = []
   for (var i = 0; i < matches.length; i++) {
     var m = matches[i]
+    if (scope && String(m.wiki || "").toLowerCase() !== scope) continue
     var hit = false
     for (var j = 0; j < 2; j++) {
       var o = m.opponents[j]
@@ -373,12 +405,14 @@ function searchTeams(index, query, opts) {
   opts = opts || {}
   var minChars = opts.minChars === undefined ? 2 : opts.minChars
   var limit = opts.limit || 12
+  var wiki = opts.wiki || ""
   var q = String(query || "").trim()
   if (q.length < minChars) return []
 
   var hits = []
   for (var i = 0; i < index.length; i++) {
     var t = index[i]
+    if (wiki && String(t.wiki || "").toLowerCase() !== String(wiki).toLowerCase()) continue
     var score = Math.max(fuzzyScore(q, t.name), fuzzyScore(q, t.short || ""))
     if (score === NO_MATCH) continue
     hits.push({ team: t, score: score })
@@ -388,6 +422,34 @@ function searchTeams(index, query, opts) {
     return String(a.team.name).localeCompare(String(b.team.name))
   })
   return hits.slice(0, limit).map(function (h) { return h.team })
+}
+
+// parseConfig decodes config.json for the settings view. The app only reads
+// it; every write goes through the CLI so validation and clamping happen in
+// one place.
+function parseConfig(text) {
+  var empty = {
+    ok: false, spoilers: "strict", followedOnly: false, hideTBD: true,
+    catchUp: { enabled: true, window: "48h0m0s" },
+    wikis: [], notifications: {}, pollInterval: "15m0s", contactEmail: ""
+  }
+  if (!text || !String(text).trim()) return empty
+  try {
+    var d = JSON.parse(text)
+    return {
+      ok: true,
+      spoilers: d.spoilers || "strict",
+      followedOnly: d.followedOnly === true,
+      hideTBD: d.hideTBD !== false,
+      catchUp: d.catchUp || { enabled: true, window: "48h0m0s" },
+      wikis: Array.isArray(d.wikis) ? d.wikis : [],
+      notifications: d.notifications || {},
+      pollInterval: d.pollInterval || "15m0s",
+      contactEmail: d.contactEmail || ""
+    }
+  } catch (e) {
+    return empty
+  }
 }
 
 // parseTeamIndex decodes teams.json defensively.

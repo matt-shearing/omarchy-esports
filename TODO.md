@@ -34,8 +34,8 @@ community marketplace recommends a namespaced id such as
 unique once listed** — they cannot be reused after retirement. Worth settling
 before submitting, not after. See `docs/PUBLISHING.md`.
 
-## Unexplained follow-list entry
+## Resolved
 
-`gamerlegion` appeared in the follow list during development and was not added
-by any step I ran. If it was not you, remove it with
-`omarchy-esports teams remove gamerlegion`.
+- The stray `gamerlegion` follow-list entry is gone. The org is now followed
+  as `{"name": "GamerLegion", "wiki": "dota2"}` — their Dota roster only,
+  which is what you were trying to express.

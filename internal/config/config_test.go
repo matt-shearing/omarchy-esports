@@ -73,13 +73,86 @@ func TestDefaultsCoverTheShippedWikis(t *testing.T) {
 }
 
 func TestFollows(t *testing.T) {
-	c := Config{Teams: []string{"Team Spirit", "  G2 Esports  "}}
+	c := Config{Teams: []Follow{{Name: "Team Spirit"}, {Name: "  G2 Esports  "}}}
 	for _, name := range []string{"team spirit", "TEAM SPIRIT", "G2 Esports"} {
-		if !c.Follows(name) {
+		if !c.Follows(name, "") {
 			t.Errorf("Follows(%q) = false, want true", name)
 		}
 	}
-	if c.Follows("Astralis") {
+	if c.Follows("Astralis", "") {
 		t.Error("Follows returned true for an unfollowed team")
+	}
+}
+
+// TestFollowsIsGameScoped covers the case that prompted the feature: an org
+// fields rosters in several games and you may want only one of them.
+func TestFollowsIsGameScoped(t *testing.T) {
+	c := Config{Teams: []Follow{{Name: "GamerLegion", Wiki: "dota2"}}}
+
+	if !c.Follows("GamerLegion", "dota2") {
+		t.Error("should follow the scoped game")
+	}
+	if c.Follows("GamerLegion", "counterstrike") {
+		t.Error("must not follow a game the entry is not scoped to")
+	}
+	// An unscoped query asks "followed anywhere?".
+	if !c.Follows("GamerLegion", "") {
+		t.Error("unscoped query should match a scoped entry")
+	}
+
+	// An unscoped entry follows the org everywhere.
+	all := Config{Teams: []Follow{{Name: "Team Spirit"}}}
+	for _, w := range []string{"dota2", "counterstrike", ""} {
+		if !all.Follows("Team Spirit", w) {
+			t.Errorf("unscoped follow should match wiki %q", w)
+		}
+	}
+}
+
+// TestFollowJSON covers both accepted forms and the compact round-trip.
+func TestFollowJSON(t *testing.T) {
+	var f Follow
+	if err := json.Unmarshal([]byte(`"Team Spirit"`), &f); err != nil {
+		t.Fatalf("bare string form should decode: %v", err)
+	}
+	if f.Name != "Team Spirit" || f.Wiki != "" {
+		t.Errorf("bare string decoded to %+v", f)
+	}
+
+	if err := json.Unmarshal([]byte(`{"name":"GamerLegion","wiki":"dota2"}`), &f); err != nil {
+		t.Fatalf("object form should decode: %v", err)
+	}
+	if f.Name != "GamerLegion" || f.Wiki != "dota2" {
+		t.Errorf("object decoded to %+v", f)
+	}
+
+	// An unscoped entry marshals back to a bare string so hand-edited configs
+	// stay readable.
+	out, _ := json.Marshal(Follow{Name: "Team Spirit"})
+	if string(out) != `"Team Spirit"` {
+		t.Errorf("unscoped follow marshalled as %s, want a bare string", out)
+	}
+	out, _ = json.Marshal(Follow{Name: "GamerLegion", Wiki: "dota2"})
+	if string(out) != `{"name":"GamerLegion","wiki":"dota2"}` {
+		t.Errorf("scoped follow marshalled as %s", out)
+	}
+}
+
+// TestConfigWithMixedTeamForms is the realistic file: some entries scoped,
+// some not.
+func TestConfigWithMixedTeamForms(t *testing.T) {
+	var c Config
+	raw := `{"teams":["Team Spirit",{"name":"GamerLegion","wiki":"dota2"}]}`
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Teams) != 2 {
+		t.Fatalf("got %d teams", len(c.Teams))
+	}
+	if c.Teams[0].Wiki != "" || c.Teams[1].Wiki != "dota2" {
+		t.Errorf("mixed forms decoded wrong: %+v", c.Teams)
+	}
+	if c.Teams[1].Label() != "GamerLegion (dota2)" {
+		t.Errorf("Label() = %q", c.Teams[1].Label())
 	}
 }

@@ -86,7 +86,7 @@ Rectangle {
             AppTeamBadge {
                 Layout.fillWidth: true
                 opponent: card.match ? card.match.opponents[0] : null
-                followed: Model.isFollowedTeam(card.match ? card.match.opponents[0] : null, card.teams)
+                followed: Model.isFollowedTeam(card.match ? card.match.opponents[0] : null, card.teams, card.match ? card.match.wiki : "")
                 onClicked: function (name) { card.inspectTeam(name) }
             }
 
@@ -102,7 +102,7 @@ Rectangle {
             AppTeamBadge {
                 Layout.fillWidth: true
                 opponent: card.match ? card.match.opponents[1] : null
-                followed: Model.isFollowedTeam(card.match ? card.match.opponents[1] : null, card.teams)
+                followed: Model.isFollowedTeam(card.match ? card.match.opponents[1] : null, card.teams, card.match ? card.match.wiki : "")
                 mirrored: true
                 onClicked: function (name) { card.inspectTeam(name) }
             }

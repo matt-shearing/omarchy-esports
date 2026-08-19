@@ -23,9 +23,13 @@ ShellRoot {
     // Non-empty when the team detail view is open, replacing the tab content.
     property string selectedTeam: ""
     property string teamQuery: ""
+    // Empty means every game; otherwise a wiki slug.
+    property string gameFilter: ""
+    property var config: Model.parseConfig("")
 
     readonly property string home: Quickshell.env("HOME") || ""
     readonly property string stateDir: home + "/.local/state/omarchy-esports"
+    readonly property string configPath: home + "/.config/omarchy-esports/config.json"
 
     FileView {
         id: stateFile
@@ -44,6 +48,18 @@ ShellRoot {
         printErrors: false
         onLoaded: app.teamIndex = Model.parseTeamIndex(text())
         onLoadFailed: app.teamIndex = []
+        onFileChanged: reload()
+    }
+
+    // Read-only: the settings view writes through the CLI so validation and
+    // clamping stay in one place.
+    FileView {
+        id: configFile
+        path: app.configPath
+        watchChanges: true
+        printErrors: false
+        onLoaded: app.config = Model.parseConfig(text())
+        onLoadFailed: app.config = Model.parseConfig("")
         onFileChanged: reload()
     }
 
@@ -78,7 +94,22 @@ ShellRoot {
             app.busy = ""
             stateFile.reload()
             teamsFile.reload()
+            configFile.reload()
         }
+    }
+
+    function applySetting(key, value) {
+        if (key === "__edit") {
+            // No terminal is guaranteed, so open the file with the desktop
+            // handler rather than assuming $EDITOR.
+            Qt.openUrlExternally("file://" + app.configPath)
+            return
+        }
+        app.run(["config", "set", key, value], "saving…")
+    }
+
+    function applyWiki(slug, on) {
+        app.run(["config", "wiki", slug, on ? "on" : "off"], "saving…")
     }
 
     function watch(m) {
@@ -93,18 +124,28 @@ ShellRoot {
         if (s && s.url) Qt.openUrlExternally(s.url)
     }
 
-    function isFollowed(name) {
+    // isFollowed answers for a specific game scope. Passing an empty wiki asks
+    // "followed in any game?".
+    function isFollowed(name, wiki) {
         var n = String(name || "").toLowerCase().trim()
         for (var i = 0; i < app.model.teams.length; i++) {
-            if (String(app.model.teams[i]).toLowerCase().trim() === n) return true
+            var t = app.model.teams[i]
+            var tn = String((t && t.name !== undefined) ? t.name : t).toLowerCase().trim()
+            if (tn !== n) continue
+            var scope = (t && t.wiki) ? String(t.wiki).toLowerCase() : ""
+            if (!scope || !wiki || scope === String(wiki).toLowerCase()) return true
         }
         return false
     }
 
-    function toggleFollow(name) {
+    // toggleFollow scopes to one game when given a wiki, so following an org's
+    // Dota roster does not also follow their Counter-Strike one.
+    function toggleFollow(name, wiki) {
         if (!name) return
-        app.run(["teams", isFollowed(name) ? "remove" : "add", name],
-                isFollowed(name) ? "unfollowing…" : "following…")
+        var on = isFollowed(name, wiki)
+        var args = ["teams", on ? "remove" : "add", name]
+        if (wiki) args = args.concat(["--game", wiki])
+        app.run(args, on ? "unfollowing…" : "following…")
     }
 
     // visible is the filtered list for the active tab. Bound as a property so
@@ -126,8 +167,11 @@ ShellRoot {
     }
 
     readonly property var vods: Model.vodSections(model.matches)
-    readonly property var searchResults: Model.searchTeams(teamIndex, teamQuery, { minChars: 2, limit: 12 })
-    readonly property var teamDetail: Model.teamMatches(model.matches, selectedTeam)
+    readonly property var searchResults: Model.searchTeams(teamIndex, teamQuery,
+        { minChars: 2, limit: 20, wiki: gameFilter })
+    readonly property var indexGames: Model.gamesInIndex(teamIndex)
+    property string selectedTeamWiki: ""
+    readonly property var teamDetail: Model.teamMatches(model.matches, selectedTeam, selectedTeamWiki)
 
     FloatingWindow {
         id: win
@@ -203,7 +247,8 @@ ShellRoot {
                         { id: "upcoming", label: "Upcoming" },
                         { id: "live", label: "Live" },
                         { id: "vods", label: "VODs" },
-                        { id: "teams", label: "Teams" }
+                        { id: "teams", label: "Teams" },
+                        { id: "settings", label: "Settings" }
                     ]
                     delegate: AppButton {
                         required property var modelData
@@ -239,6 +284,7 @@ ShellRoot {
                 Layout.fillHeight: true
                 currentIndex: {
                     if (app.selectedTeam !== "") return 3
+                    if (app.tab === "settings") return 4
                     if (app.tab === "teams") return 2
                     if (app.tab === "vods") return 1
                     return 0
@@ -384,6 +430,38 @@ ShellRoot {
                         }
                     }
 
+                    // Filter chips. An org can field rosters in several games,
+                    // so search results are per game and this narrows them.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Text {
+                            text: "Game"
+                            color: Theme.muted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                        }
+
+                        AppButton {
+                            text: "All"
+                            accentuated: app.gameFilter === ""
+                            onClicked: app.gameFilter = ""
+                        }
+
+                        Repeater {
+                            model: app.indexGames
+                            delegate: AppButton {
+                                required property var modelData
+                                text: modelData.game
+                                accentuated: app.gameFilter === modelData.wiki
+                                onClicked: app.gameFilter = modelData.wiki
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+                    }
+
                     Text {
                         text: {
                             var q = app.teamQuery.trim()
@@ -412,19 +490,25 @@ ShellRoot {
                         // the search results.
                         model: {
                             if (app.teamQuery.trim().length >= 2) return app.searchResults
+                            // With no query this is the follow list, resolved
+                            // against the index so each entry gets its artwork.
                             var out = []
                             for (var i = 0; i < app.model.teams.length; i++) {
-                                var name = app.model.teams[i]
+                                var entry = app.model.teams[i]
+                                var name = (entry && entry.name !== undefined) ? entry.name : entry
+                                var scope = (entry && entry.wiki) ? entry.wiki : ""
                                 var found = null
                                 for (var j = 0; j < app.teamIndex.length; j++) {
                                     var t = app.teamIndex[j]
-                                    if (String(t.name).toLowerCase() === String(name).toLowerCase() ||
-                                        String(t.short || "").toLowerCase() === String(name).toLowerCase()) {
-                                        found = t
-                                        break
-                                    }
+                                    var sameName = String(t.name).toLowerCase() === String(name).toLowerCase() ||
+                                        String(t.short || "").toLowerCase() === String(name).toLowerCase()
+                                    if (!sameName) continue
+                                    if (scope && String(t.wiki).toLowerCase() !== String(scope).toLowerCase()) continue
+                                    found = t
+                                    break
                                 }
-                                out.push(found ? found : { name: name, short: "", game: "", logo: {} })
+                                out.push(found ? found
+                                    : { name: name, short: "", game: scope, wiki: scope, logo: {} })
                             }
                             return out
                         }
@@ -433,9 +517,12 @@ ShellRoot {
                             required property var modelData
                             width: ListView.view.width
                             team: modelData
-                            followed: app.isFollowed(modelData.name)
-                            onToggleFollow: app.toggleFollow(modelData.name)
-                            onInspect: app.selectedTeam = modelData.name
+                            followed: app.isFollowed(modelData.name, modelData.wiki)
+                            onToggleFollow: app.toggleFollow(modelData.name, modelData.wiki)
+                            onInspect: {
+                                app.selectedTeam = modelData.name
+                                app.selectedTeamWiki = modelData.wiki || ""
+                            }
                         }
                     }
                 }
@@ -454,7 +541,8 @@ ShellRoot {
                         }
 
                         Text {
-                            text: app.selectedTeam
+                            text: app.selectedTeam +
+                                (app.selectedTeamWiki !== "" ? "  ·  " + app.selectedTeamWiki : "")
                             color: Theme.foreground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontTitle
@@ -464,9 +552,9 @@ ShellRoot {
                         Item { Layout.fillWidth: true }
 
                         AppButton {
-                            text: app.isFollowed(app.selectedTeam) ? "Unfollow" : "Follow"
-                            accentuated: !app.isFollowed(app.selectedTeam)
-                            onClicked: app.toggleFollow(app.selectedTeam)
+                            text: app.isFollowed(app.selectedTeam, app.selectedTeamWiki) ? "Unfollow" : "Follow"
+                            accentuated: !app.isFollowed(app.selectedTeam, app.selectedTeamWiki)
+                            onClicked: app.toggleFollow(app.selectedTeam, app.selectedTeamWiki)
                         }
                     }
 
@@ -533,6 +621,14 @@ ShellRoot {
                             }
                         }
                     }
+                }
+
+                // 4 — settings
+                SettingsView {
+                    config: app.config
+                    teamIndex: app.teamIndex
+                    onApply: function (key, value) { app.applySetting(key, value) }
+                    onApplyWiki: function (slug, on) { app.applyWiki(slug, on) }
                 }
             }
 

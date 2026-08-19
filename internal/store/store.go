@@ -35,13 +35,23 @@ type Public struct {
 	Matches []match.Match `json:"matches"`
 	// Spoilers echoes the active policy so the UI can label its blackouts.
 	Spoilers string `json:"spoilers"`
-	// Teams is the follow list, so the UI can render it without re-reading config.
-	Teams []string `json:"teams"`
+	// Teams is the follow list, so the UI can render it without re-reading
+	// config. Entries carry their game scope, since a team can be followed in
+	// one game and not another.
+	Teams []PublicTeam `json:"teams"`
 	// Errors records per-wiki failures from the last refresh, so the UI can
 	// show a degraded state instead of silently displaying stale data.
 	Errors []string `json:"errors,omitempty"`
 	// Attribution is required by Liquipedia's CC-BY-SA 3.0 terms.
 	Attribution string `json:"attribution"`
+}
+
+// PublicTeam is one follow-list entry as published to the UI.
+type PublicTeam struct {
+	Name string `json:"name"`
+	// Wiki is empty when the team is followed across every game.
+	Wiki string `json:"wiki,omitempty"`
+	Game string `json:"game,omitempty"`
 }
 
 // Private is the daemon's own record.
@@ -64,8 +74,16 @@ type Private struct {
 	TournamentStreams map[string]TournamentInfo `json:"tournamentStreams"`
 }
 
-// TeamEntry is one team in the searchable index.
+// TeamEntry is one team in one game.
+//
+// The index is keyed by (wiki, name) rather than name alone. Several orgs
+// field rosters in more than one game — GamerLegion, NAVI, Team Spirit and
+// Team Falcons all appear in both the Counter-Strike and Dota 2 wikis — and
+// keying by name collapsed them into a single entry carrying whichever game
+// happened to be seen last, which made the other roster unfindable.
 type TeamEntry struct {
+	// Key is the stable "<wiki>/<lowercased name>" identifier.
+	Key      string     `json:"key"`
 	Name     string     `json:"name"`
 	Short    string     `json:"short,omitempty"`
 	Page     string     `json:"page,omitempty"`
@@ -258,7 +276,12 @@ func (s *Store) TeamsPath() string { return filepath.Join(s.dir, "teams.json") }
 func (s *Store) SaveTeams(teams []TeamEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sort.SliceStable(teams, func(i, j int) bool { return teams[i].Name < teams[j].Name })
+	sort.SliceStable(teams, func(i, j int) bool {
+		if teams[i].Name != teams[j].Name {
+			return teams[i].Name < teams[j].Name
+		}
+		return teams[i].Wiki < teams[j].Wiki
+	})
 	return writeJSON(s.TeamsPath(), map[string]any{
 		"version": CurrentVersion,
 		"teams":   teams,

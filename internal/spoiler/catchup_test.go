@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/contra/omarchy-esports/internal/config"
 	"github.com/contra/omarchy-esports/internal/match"
 )
 
@@ -39,7 +40,7 @@ func scenario(now time.Time) []match.Match {
 
 func defaultOpts(now time.Time) CatchUpOptions {
 	return CatchUpOptions{
-		Teams:  []string{"Team Spirit"},
+		Teams:  []config.Follow{{Name: "Team Spirit"}},
 		Window: 24 * time.Hour,
 		Now:    now,
 	}
@@ -199,7 +200,7 @@ func TestBothSidesFollowedHidesBoth(t *testing.T) {
 			Opponents: [2]match.Opponent{opp("Team Spirit"), opp("Team Falcons")}},
 	}
 	opts := defaultOpts(now)
-	opts.Teams = []string{"Team Spirit", "Team Falcons"}
+	opts.Teams = []config.Follow{{Name: "Team Spirit"}, {Name: "Team Falcons"}}
 	out := ApplyCatchUp(ms, opts)
 
 	if !out[2].Masked {

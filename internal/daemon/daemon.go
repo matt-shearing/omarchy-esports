@@ -187,6 +187,27 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	return d.publish(priv, errs)
 }
 
+// publicTeams renders the follow list for the UI, resolving each entry's game
+// label from the team index where possible.
+func (d *Daemon) publicTeams() []store.PublicTeam {
+	priv, err := d.store.LoadPrivate()
+	var index map[string]store.TeamEntry
+	if err == nil {
+		index = priv.Teams
+	}
+	out := make([]store.PublicTeam, 0, len(d.cfg.Teams))
+	for _, f := range d.cfg.Teams {
+		pt := store.PublicTeam{Name: f.Name, Wiki: f.Wiki}
+		if f.Wiki != "" && index != nil {
+			if e, ok := index[f.Wiki+"/"+strings.ToLower(f.Name)]; ok {
+				pt.Game = e.Game
+			}
+		}
+		out = append(out, pt)
+	}
+	return out
+}
+
 // indexTeams accumulates every team seen in a ticker into a searchable index.
 //
 // Building it from matches we have already fetched means the app's follow-list
@@ -197,6 +218,14 @@ func (d *Daemon) indexTeams(ms []match.Match, priv *store.Private) {
 	if priv.Teams == nil {
 		priv.Teams = map[string]store.TeamEntry{}
 	}
+	// Drop entries written before the index was keyed per game. Those keys
+	// were the bare team name, so an org playing two games collapsed into one
+	// entry carrying whichever game was seen last.
+	for k := range priv.Teams {
+		if !strings.Contains(k, "/") {
+			delete(priv.Teams, k)
+		}
+	}
 	now := time.Now()
 	for _, m := range ms {
 		for _, o := range m.Opponents {
@@ -204,11 +233,14 @@ func (d *Daemon) indexTeams(ms []match.Match, priv *store.Private) {
 			if name == "" || o.Hidden || strings.EqualFold(name, "TBD") {
 				continue
 			}
-			key := strings.ToLower(name)
+			// Key per game: one org can field rosters in several wikis and
+			// each needs its own entry, artwork and follow state.
+			key := m.Wiki + "/" + strings.ToLower(name)
 			entry, ok := priv.Teams[key]
 			if !ok {
-				entry = store.TeamEntry{Name: name}
+				entry = store.TeamEntry{Key: key, Name: name}
 			}
+			entry.Key = key
 			entry.Short = firstNonEmpty(o.Short, entry.Short)
 			entry.Page = firstNonEmpty(o.Page, entry.Page)
 			entry.Wiki = firstNonEmpty(m.Wiki, entry.Wiki)
@@ -285,6 +317,11 @@ func (d *Daemon) Reevaluate(ctx context.Context) error {
 	now := time.Now()
 	for i := range priv.Matches {
 		priv.Matches[i].State = priv.Matches[i].DeriveState(now, time.Duration(d.cfg.LiveWindow))
+		// Re-derive rather than trusting the stored flag: the follow list can
+		// change between refreshes, and a refresh is minutes away because of
+		// Liquipedia's rate limit. Without this, following or unfollowing a
+		// team appears to do nothing until the next poll.
+		priv.Matches[i].Followed = d.isFollowed(&priv.Matches[i])
 	}
 	d.dispatchNotifications(&priv)
 	if err := d.store.SavePrivate(priv); err != nil {
@@ -318,7 +355,7 @@ func (d *Daemon) publish(priv store.Private, errs []string) error {
 		UpdatedAt: priv.UpdatedAt,
 		Matches:   visible,
 		Spoilers:  string(d.cfg.Spoilers),
-		Teams:     d.cfg.Teams,
+		Teams:     d.publicTeams(),
 		Errors:    errs,
 	})
 }
@@ -342,7 +379,7 @@ func (d *Daemon) filterAndAnnotate(ms []match.Match, now time.Time) []match.Matc
 			continue
 		}
 		m.State = m.DeriveState(now, time.Duration(d.cfg.LiveWindow))
-		m.Followed = m.Involves(d.cfg.Teams)
+		m.Followed = d.isFollowed(&m)
 		if d.cfg.FollowedOnly && !m.Followed {
 			continue
 		}
@@ -351,6 +388,17 @@ func (d *Daemon) filterAndAnnotate(ms []match.Match, now time.Time) []match.Matc
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].StartsAt.Before(out[j].StartsAt) })
 	return out
+}
+
+// isFollowed reports whether a match involves a followed team, honouring the
+// game scope on each follow entry.
+func (d *Daemon) isFollowed(m *match.Match) bool {
+	for _, f := range d.cfg.Teams {
+		if m.InvolvesTeam(f.Name, f.Wiki) {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeWithKnown carries forward enrichment (streams, VODs) that the ticker

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -98,23 +99,68 @@ commands:
                      --json
   teams            manage the follow list
                      list | add <name>... | remove <name>...
+                     --game <slug>  scope to one game, e.g. --game dota2
   reveal <id>      unblind one match's result
   hide <id>        re-blind a revealed match
   watched <id>     mark a match watched, advancing the catch-up queue
   unwatch <id>     mark it unwatched again
   search <query>   fuzzy-search the team index
-                     --json
+                     --json  --game <slug>
   team <name>      show a team's upcoming matches
-                     --json
+                     --json  --game <slug>
   refresh          force an immediate refresh
   open <id>        open a match
                      --stream    open the live stream (default)
                      --vod       open the VOD
   config           show or edit configuration
                      path | edit | show
+                     set <key> <value>   e.g. set spoilers balanced
+                                              set catchUp.window 72h
+                                              set notifications.vodReady false
+                     wiki <slug> on|off  e.g. wiki starcraft2 off
 
 Match data from Liquipedia (CC BY-SA 3.0).
 `)
+}
+
+// hoistFlags moves flags ahead of positional arguments.
+//
+// Go's flag package stops parsing at the first non-flag argument, so
+// `search gamer --game dota2` would treat "--game" and "dota2" as search
+// terms rather than as a flag. Nobody writes `search --game dota2 gamer`, so
+// reorder the arguments instead of making the user do it.
+//
+// valueFlags names the flags that take a following value, so their argument
+// travels with them.
+func hoistFlags(args []string, valueFlags map[string]bool) []string {
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			positional = append(positional, a)
+			continue
+		}
+		flags = append(flags, a)
+		name := strings.TrimLeft(a, "-")
+		// "--game=dota2" already carries its value.
+		if strings.Contains(a, "=") {
+			continue
+		}
+		if valueFlags[name] && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	// Emit an explicit terminator so the flag package treats everything after
+	// it as literal — including a team name that begins with a dash.
+	if len(positional) > 0 {
+		flags = append(flags, "--")
+	}
+	return append(flags, positional...)
 }
 
 // openStore builds the state store.
@@ -336,41 +382,66 @@ func cmdTeams(args []string) error {
 			fmt.Println("no teams followed — `omarchy-esports teams add \"Team Spirit\"`")
 			return nil
 		}
-		sorted := append([]string(nil), cfg.Teams...)
-		sort.Strings(sorted)
+		sorted := append([]config.Follow(nil), cfg.Teams...)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			if sorted[i].Name != sorted[j].Name {
+				return sorted[i].Name < sorted[j].Name
+			}
+			return sorted[i].Wiki < sorted[j].Wiki
+		})
 		for _, t := range sorted {
-			fmt.Println(t)
+			fmt.Println(t.Label())
 		}
 		return nil
 	}
 
-	action, names := args[0], args[1:]
+	action := args[0]
+	fs := flag.NewFlagSet("teams", flag.ExitOnError)
+	// Orgs field rosters in several games, so a follow can be scoped to one.
+	game := fs.String("game", "", "restrict to one wiki slug (dota2, counterstrike, starcraft2)")
+	if err := fs.Parse(hoistFlags(args[1:], map[string]bool{"game": true})); err != nil {
+		return err
+	}
+	names := fs.Args()
 	if len(names) == 0 {
 		return fmt.Errorf("%s needs at least one team name", action)
 	}
+	wiki := strings.ToLower(strings.TrimSpace(*game))
+	if wiki != "" && !cfg.WikiEnabled(wiki) {
+		var slugs []string
+		for _, w := range cfg.Wikis {
+			slugs = append(slugs, w.Slug)
+		}
+		return fmt.Errorf("unknown or disabled wiki %q (configured: %s)", wiki, strings.Join(slugs, ", "))
+	}
+
 	switch action {
 	case "add":
 		for _, n := range names {
-			if !cfg.Follows(n) {
-				cfg.Teams = append(cfg.Teams, n)
-				fmt.Println("following", n)
+			n = strings.TrimSpace(n)
+			if cfg.FollowIndex(n, wiki) >= 0 {
+				continue
 			}
+			cfg.Teams = append(cfg.Teams, config.Follow{Name: n, Wiki: wiki})
+			fmt.Println("following", config.Follow{Name: n, Wiki: wiki}.Label())
 		}
 	case "remove", "rm":
-		keep := cfg.Teams[:0]
-		for _, t := range cfg.Teams {
-			drop := false
-			for _, n := range names {
-				if strings.EqualFold(strings.TrimSpace(t), strings.TrimSpace(n)) {
-					drop = true
-					fmt.Println("unfollowed", t)
+		for _, n := range names {
+			n = strings.TrimSpace(n)
+			kept := cfg.Teams[:0]
+			for _, t := range cfg.Teams {
+				// With no --game, remove every scope for that name; with one,
+				// remove only the matching entry.
+				drop := strings.EqualFold(strings.TrimSpace(t.Name), n) &&
+					(wiki == "" || strings.EqualFold(t.Wiki, wiki))
+				if drop {
+					fmt.Println("unfollowed", t.Label())
+					continue
 				}
+				kept = append(kept, t)
 			}
-			if !drop {
-				keep = append(keep, t)
-			}
+			cfg.Teams = kept
 		}
-		cfg.Teams = keep
 	default:
 		return fmt.Errorf("unknown teams action %q (want list, add or remove)", action)
 	}
@@ -480,13 +551,15 @@ func cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	limit := fs.Int("limit", 15, "maximum results")
-	if err := fs.Parse(args); err != nil {
+	game := fs.String("game", "", "restrict to one wiki slug (dota2, counterstrike, starcraft2)")
+	if err := fs.Parse(hoistFlags(args, map[string]bool{"game": true, "limit": true})); err != nil {
 		return err
 	}
 	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if query == "" {
 		return errors.New("need a search query")
 	}
+	gameFilter := strings.ToLower(strings.TrimSpace(*game))
 	st, err := openStore()
 	if err != nil {
 		return err
@@ -504,8 +577,11 @@ func cmdSearch(args []string) error {
 	}
 	var hits []scored
 	for _, t := range teams {
+		if gameFilter != "" && !strings.EqualFold(t.Wiki, gameFilter) {
+			continue
+		}
 		if s := fuzzy.Best(query, t.Name, t.Short); s != fuzzy.NoMatch {
-			hits = append(hits, scored{TeamEntry: t, Score: s, Followed: cfg.Follows(t.Name)})
+			hits = append(hits, scored{TeamEntry: t, Score: s, Followed: cfg.Follows(t.Name, t.Wiki)})
 		}
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
@@ -523,21 +599,29 @@ func cmdSearch(args []string) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "TEAM\tSHORT\tGAME\tFOLLOWED")
+	fmt.Fprintln(w, "TEAM\tSHORT\tGAME\tWIKI\tFOLLOWED")
 	for _, h := range hits {
 		star := ""
 		if h.Followed {
 			star = "*"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, h.Short, h.Game, star)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", h.Name, h.Short, h.Game, h.Wiki, star)
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if len(hits) > 0 && hits[0].Wiki != "" {
+		fmt.Println("\nfollow one game only:  omarchy-esports teams add \"" +
+			hits[0].Name + "\" --game " + hits[0].Wiki)
+	}
+	return nil
 }
 
 func cmdTeam(args []string) error {
 	fs := flag.NewFlagSet("team", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
-	if err := fs.Parse(args); err != nil {
+	game := fs.String("game", "", "restrict to one wiki slug")
+	if err := fs.Parse(hoistFlags(args, map[string]bool{"game": true})); err != nil {
 		return err
 	}
 	name := strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -552,9 +636,10 @@ func cmdTeam(args []string) error {
 	if err != nil {
 		return err
 	}
+	wiki := strings.ToLower(strings.TrimSpace(*game))
 	var out []match.Match
 	for _, m := range pub.Matches {
-		if m.Involves([]string{name}) {
+		if m.InvolvesTeam(name, wiki) {
 			out = append(out, m)
 		}
 	}
@@ -580,7 +665,7 @@ func cmdOpen(args []string) error {
 	fs := flag.NewFlagSet("open", flag.ExitOnError)
 	wantVOD := fs.Bool("vod", false, "open the VOD")
 	wantStream := fs.Bool("stream", false, "open the live stream")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(hoistFlags(args, nil)); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
@@ -673,9 +758,107 @@ func cmdConfig(args []string) error {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(cfg)
+	case "set":
+		if len(args) < 3 {
+			return errors.New("usage: config set <key> <value>   e.g. config set spoilers balanced")
+		}
+		return configSet(args[1], strings.Join(args[2:], " "))
+	case "wiki":
+		if len(args) < 3 {
+			return errors.New("usage: config wiki <slug> on|off")
+		}
+		return configWiki(args[1], args[2])
 	default:
-		return fmt.Errorf("unknown config action %q", action)
+		return fmt.Errorf("unknown config action %q (want path, edit, show, set or wiki)", action)
 	}
+	return nil
+}
+
+// configSet writes a dotted key into the config file.
+//
+// It edits the file as generic JSON and then re-decodes it into Config, so
+// every value still goes through the same validation and clamping as a
+// hand-edited file — a bad duration or spoiler mode is rejected here rather
+// than silently accepted and corrected at load time.
+func configSet(key, raw string) error {
+	if _, err := config.Load(); err != nil { // ensure the file exists
+		return err
+	}
+	data, err := os.ReadFile(config.Path())
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parsing %s: %w", config.Path(), err)
+	}
+
+	parts := strings.Split(key, ".")
+	cur := doc
+	for i, p := range parts[:len(parts)-1] {
+		next, ok := cur[p].(map[string]any)
+		if !ok {
+			if cur[p] != nil {
+				return fmt.Errorf("%s is not a section", strings.Join(parts[:i+1], "."))
+			}
+			next = map[string]any{}
+			cur[p] = next
+		}
+		cur = next
+	}
+	cur[parts[len(parts)-1]] = parseScalar(raw)
+
+	merged, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	cfg := config.Default()
+	if err := json.Unmarshal(merged, &cfg); err != nil {
+		return fmt.Errorf("%s = %q is not valid: %w", key, raw, err)
+	}
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("%s = %v\n", key, cur[parts[len(parts)-1]])
+	return nil
+}
+
+// parseScalar turns a command-line value into the JSON type it looks like, so
+// `config set catchUp.enabled false` stores a boolean rather than a string.
+func parseScalar(raw string) any {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "yes", "on":
+		return true
+	case "false", "no", "off":
+		return false
+	}
+	if n, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil {
+		return n
+	}
+	return raw
+}
+
+// configWiki enables or disables one game.
+func configWiki(slug, state string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	on := parseScalar(state) == true
+	found := false
+	for i := range cfg.Wikis {
+		if strings.EqualFold(cfg.Wikis[i].Slug, slug) {
+			cfg.Wikis[i].Enabled = on
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("no wiki %q in the config; add it under \"wikis\" first", slug)
+	}
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("%s %s\n", slug, map[bool]string{true: "enabled", false: "disabled"}[on])
 	return nil
 }
 

@@ -195,14 +195,30 @@ func (o Opponent) Display() string {
 // compared case-insensitively against both canonical and short forms.
 func (m *Match) Involves(names []string) bool {
 	for _, n := range names {
-		n = normalise(n)
-		if n == "" {
+		if m.InvolvesTeam(n, "") {
+			return true
+		}
+	}
+	return false
+}
+
+// InvolvesTeam reports whether either side is the named team. An empty wiki
+// matches any game; otherwise the match must be from that wiki, which is what
+// lets a follow entry mean "GamerLegion's Dota roster" rather than the org.
+func (m *Match) InvolvesTeam(name, wiki string) bool {
+	n := normalise(name)
+	if n == "" {
+		return false
+	}
+	if wiki != "" && !strings.EqualFold(m.Wiki, wiki) {
+		return false
+	}
+	for _, o := range m.Opponents {
+		if o.Hidden {
 			continue
 		}
-		for _, o := range m.Opponents {
-			if normalise(o.Name) == n || normalise(o.Short) == n {
-				return true
-			}
+		if normalise(o.Name) == n || normalise(o.Short) == n {
+			return true
 		}
 	}
 	return false

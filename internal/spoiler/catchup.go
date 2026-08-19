@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/contra/omarchy-esports/internal/config"
 	"github.com/contra/omarchy-esports/internal/match"
 )
 
@@ -28,7 +29,7 @@ import (
 // CatchUpOptions configures masking.
 type CatchUpOptions struct {
 	// Teams is the follow list.
-	Teams []string
+	Teams []config.Follow
 	// Watched marks matches the user has already seen.
 	Watched map[string]bool
 	// Revealed marks matches the user explicitly unblinded; these are never
@@ -73,12 +74,18 @@ func ApplyCatchUp(ms []match.Match, opts CatchUpOptions) []match.Match {
 	// fields separate Dota 2 and Counter-Strike rosters, and being behind on
 	// one game says nothing about the other, so a Dota backlog must not hide
 	// their CS fixtures.
-	for _, team := range opts.Teams {
-		team = strings.TrimSpace(team)
+	for _, follow := range opts.Teams {
+		team := strings.TrimSpace(follow.Name)
 		if team == "" {
 			continue
 		}
-		for _, wiki := range wikisForTeam(ms, team) {
+		// A game-scoped entry only builds a queue in that wiki; an unscoped
+		// one builds a separate queue per wiki the team appears in.
+		wikis := []string{follow.Wiki}
+		if follow.Wiki == "" {
+			wikis = wikisForTeam(ms, team)
+		}
+		for _, wiki := range wikis {
 			applyTeamQueue(ms, team, wiki, opts, cutoff, hideSide, maskedFor)
 		}
 	}

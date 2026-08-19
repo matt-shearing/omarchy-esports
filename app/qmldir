@@ -6,3 +6,5 @@ AppButton 1.0 AppButton.qml
 AppTeamBadge 1.0 AppTeamBadge.qml
 MatchCard 1.0 MatchCard.qml
 TeamResultRow 1.0 TeamResultRow.qml
+SettingRow 1.0 SettingRow.qml
+SettingsView 1.0 SettingsView.qml
