@@ -77,6 +77,19 @@ type Private struct {
 	// an endpoint that had just asked us to stop, which is the surest way to
 	// turn a short throttle into a long one.
 	LogoBackoffUntil time.Time `json:"logoBackoffUntil,omitempty"`
+	// Videos is every YouTube upload ever seen, keyed by video id.
+	//
+	// The RSS feed only carries a channel's ~15 most recent uploads, which
+	// during a big event is a few days at most — the official Dota channel
+	// posts every match in four languages, so a fixture from Tuesday has
+	// scrolled out by Thursday. Remembering what we have seen turns a rolling
+	// window into an accumulating index, so a VOD stays findable long after it
+	// leaves the feed.
+	Videos map[string]StoredVideo `json:"videos"`
+	// VideoSweeps records when each channel was last enumerated with the
+	// backfiller. That walk is far more expensive than an RSS poll, so it runs
+	// on a long cooldown and only when something is actually missing.
+	VideoSweeps map[string]time.Time `json:"videoSweeps,omitempty"`
 	// DirectorySweeps records when each wiki's team directory was last
 	// enumerated, so a sweep is not repeated on every refresh.
 	DirectorySweeps map[string]time.Time `json:"directorySweeps"`
@@ -84,6 +97,16 @@ type Private struct {
 	// pages, keyed by tournament page path. These are expensive to fetch
 	// (one rate-limited parse each) and change rarely.
 	TournamentStreams map[string]TournamentInfo `json:"tournamentStreams"`
+}
+
+// StoredVideo is one remembered upload.
+type StoredVideo struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Channel   string    `json:"channel,omitempty"`
+	Published time.Time `json:"published"`
+	Thumbnail string    `json:"thumbnail,omitempty"`
+	Lang      string    `json:"lang,omitempty"`
 }
 
 // TeamEntry is one team in one game.
@@ -189,6 +212,7 @@ func (s *Store) LoadPrivate() (Private, error) {
 		Watched:           map[string]bool{},
 		Notified:          map[string]time.Time{},
 		Teams:             map[string]TeamEntry{},
+		Videos:            map[string]StoredVideo{},
 		DirectorySweeps:   map[string]time.Time{},
 		TournamentStreams: map[string]TournamentInfo{},
 	}
@@ -208,6 +232,7 @@ func (s *Store) LoadPrivate() (Private, error) {
 			Watched:           map[string]bool{},
 			Notified:          map[string]time.Time{},
 			Teams:             map[string]TeamEntry{},
+			Videos:            map[string]StoredVideo{},
 			DirectorySweeps:   map[string]time.Time{},
 			TournamentStreams: map[string]TournamentInfo{},
 		}, nil
@@ -223,6 +248,9 @@ func (s *Store) LoadPrivate() (Private, error) {
 	}
 	if p.DirectorySweeps == nil {
 		p.DirectorySweeps = map[string]time.Time{}
+	}
+	if p.Videos == nil {
+		p.Videos = map[string]StoredVideo{}
 	}
 	if p.Notified == nil {
 		p.Notified = map[string]time.Time{}

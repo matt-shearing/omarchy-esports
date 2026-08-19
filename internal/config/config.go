@@ -199,6 +199,11 @@ type YouTube struct {
 	Channels []string `json:"channels,omitempty"`
 	// MaxAge bounds how far back a VOD can be published and still be matched.
 	MaxAge Duration `json:"maxAge"`
+	// Backfill allows shelling out to yt-dlp to recover VODs that have already
+	// scrolled out of a channel's RSS feed. It needs yt-dlp on PATH and is a
+	// no-op without it. Off means VOD discovery sees only the ~15 most recent
+	// uploads per channel, which a busy event exhausts in about a day.
+	Backfill bool `json:"backfill"`
 }
 
 // MinPollInterval is the floor on polling, to stay well inside Liquipedia's
@@ -228,8 +233,9 @@ func Default() Config {
 			TournamentStarting: true,
 		},
 		YouTube: YouTube{
-			Enabled: true,
-			MaxAge:  Duration(7 * 24 * time.Hour),
+			Enabled:  true,
+			MaxAge:   Duration(7 * 24 * time.Hour),
+			Backfill: true,
 		},
 	}
 }

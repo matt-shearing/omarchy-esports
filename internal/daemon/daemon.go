@@ -28,6 +28,7 @@ type Daemon struct {
 	cfg      config.Config
 	lp       *liquipedia.Client
 	yt       *youtube.Client
+	ytBack   *youtube.Backfiller
 	store    *store.Store
 	notifier *notify.Sender
 	logger   *log.Logger
@@ -81,6 +82,7 @@ func New(o Options) *Daemon {
 		lp:                   liquipedia.New(o.Version, o.Config.ContactEmail, store.CacheDir()),
 		logos:                liquipedia.NewLogoCache(store.CacheDir()),
 		yt:                   youtube.New(15 * time.Minute),
+		ytBack:               youtube.NewBackfiller(0),
 		store:                o.Store,
 		notifier:             notifier,
 		logger:               logger,
@@ -1073,44 +1075,202 @@ func (d *Daemon) enrich(ctx context.Context, ms []match.Match, priv *store.Priva
 	return nil
 }
 
-// discoverVODs looks for recorded video of finished matches on the channels
-// associated with their tournament.
+// discoverVODs looks for recorded video of finished matches.
+//
+// Two things were wrong with scoping this per tournament. The channels come
+// from a tournament page, but stream enrichment skips finished matches — so
+// the very pages whose matches need a VOD never had their channels fetched.
+// And a big event spans several pages (Group Stage, Main Event), each with its
+// own broadcast table.
+//
+// So every known channel is polled, and every unmatched finished fixture is
+// offered every remembered video. Matching demands both team names, which
+// makes a cross-tournament false positive very unlikely.
 func (d *Daemon) discoverVODs(ctx context.Context, ms []match.Match, priv *store.Private) {
 	maxAge := time.Duration(d.cfg.YouTube.MaxAge)
 
-	// Collect the channels worth checking, and which matches each serves.
-	channels := map[string][]int{}
-	for i, m := range ms {
-		if m.State != match.StateFinished || m.VOD != nil {
+	channels := d.knownChannels(priv)
+	for _, id := range channels {
+		videos, err := d.yt.Videos(ctx, id)
+		if err != nil {
+			d.logger.Printf("youtube %s: %v", id, err)
 			continue
 		}
-		if time.Since(m.StartsAt) > maxAge {
-			continue
-		}
-		if info, ok := priv.TournamentStreams[m.Tournament.Page]; ok {
-			for _, c := range info.YouTubeChannels {
-				channels[c] = append(channels[c], i)
-			}
-		}
-		for _, c := range d.cfg.YouTube.Channels {
-			channels[c] = append(channels[c], i)
-		}
+		d.rememberVideos(videos, priv)
 	}
 
-	for channelID, idxs := range channels {
-		videos, err := d.yt.Videos(ctx, channelID)
-		if err != nil {
-			d.logger.Printf("youtube %s: %v", channelID, err)
+	found := d.matchVODs(ms, priv, maxAge)
+
+	// Anything still unmatched is either genuinely unrecorded or was uploaded
+	// before we started watching. Only the second case is fixable, and only by
+	// reading further back than a feed goes.
+	if d.cfg.YouTube.Backfill && d.ytBack.Available() {
+		if missing := unmatchedFinished(ms, maxAge); len(missing) > 0 {
+			if d.backfillVODs(ctx, missing, channels, priv) {
+				found += d.matchVODs(ms, priv, maxAge)
+			}
+		}
+	}
+	if found > 0 {
+		d.logger.Printf("vods: matched %d fixture(s) against %d remembered video(s)", found, len(priv.Videos))
+	}
+}
+
+// matchVODs ties remembered videos to fixtures that do not yet have one.
+func (d *Daemon) matchVODs(ms []match.Match, priv *store.Private, maxAge time.Duration) int {
+	known := make([]youtube.Video, 0, len(priv.Videos))
+	for _, v := range priv.Videos {
+		known = append(known, youtube.Video{
+			ID: v.ID, Title: v.Title, Channel: v.Channel,
+			Published: v.Published, Thumbnail: v.Thumbnail, Lang: v.Lang,
+		})
+	}
+	found := 0
+	for i := range ms {
+		if ms[i].State != match.StateFinished || ms[i].VOD != nil {
 			continue
 		}
-		for _, i := range idxs {
-			if ms[i].VOD != nil {
-				continue
+		if time.Since(ms[i].StartsAt) > maxAge {
+			continue
+		}
+		if v := youtube.Match(ms[i], known, "en", maxAge); v != nil {
+			ms[i].VOD = v
+			found++
+			d.logger.Printf("vod for %s: %s", ms[i].Title(), v.VideoID)
+		}
+	}
+	return found
+}
+
+// unmatchedFinished lists the fixtures a VOD is still wanted for.
+func unmatchedFinished(ms []match.Match, maxAge time.Duration) []match.Match {
+	var out []match.Match
+	for i := range ms {
+		if ms[i].State == match.StateFinished && ms[i].VOD == nil &&
+			time.Since(ms[i].StartsAt) <= maxAge {
+			out = append(out, ms[i])
+		}
+	}
+	return out
+}
+
+const (
+	// videoSweepTTL spaces out the deep channel walk. It is much heavier than
+	// an RSS poll, and a channel's back catalogue does not change.
+	videoSweepTTL = 24 * time.Hour
+	// maxHydrate bounds how many publish dates one sweep resolves. Each costs
+	// its own request, so this is the real cost ceiling of a backfill.
+	maxHydrate = 60
+)
+
+// backfillVODs walks channels with yt-dlp to recover uploads that have already
+// left the RSS window, and reports whether it learned anything new.
+func (d *Daemon) backfillVODs(ctx context.Context, missing []match.Match, channels []string, priv *store.Private) bool {
+	if priv.VideoSweeps == nil {
+		priv.VideoSweeps = map[string]time.Time{}
+	}
+	added := 0
+	for _, ch := range channels {
+		if time.Since(priv.VideoSweeps[ch]) < videoSweepTTL {
+			continue
+		}
+		listing, err := d.ytBack.List(ctx, ch)
+		// Record the attempt either way, so a channel that consistently fails
+		// is not retried on every single refresh.
+		priv.VideoSweeps[ch] = time.Now()
+		if err != nil {
+			d.logger.Printf("backfill %s: %v", ch, err)
+			continue
+		}
+
+		// Only videos naming both sides of a fixture we still want are worth a
+		// date lookup; everything else on the channel is dropped for free.
+		short := youtube.ShortlistFor(missing, listing, "en", 3)
+		need := make([]string, 0, len(short))
+		for _, v := range short {
+			if _, seen := priv.Videos[v.ID]; !seen {
+				need = append(need, v.ID)
 			}
-			if v := youtube.Match(ms[i], videos, "en", maxAge); v != nil {
-				ms[i].VOD = v
-				d.logger.Printf("vod for %s: %s", ms[i].Title(), v.VideoID)
+		}
+		if len(need) > maxHydrate {
+			d.logger.Printf("backfill %s: %d candidates, resolving %d (best per fixture first)", ch, len(need), maxHydrate)
+			need = need[:maxHydrate]
+		}
+		if len(need) == 0 {
+			d.logger.Printf("backfill %s: %d uploads listed, nothing new to resolve", ch, len(listing))
+			continue
+		}
+
+		dates, err := d.ytBack.Dates(ctx, need)
+		if err != nil {
+			d.logger.Printf("backfill %s dates: %v", ch, err)
+		}
+		hydrated := make([]youtube.Video, 0, len(dates))
+		for _, v := range short {
+			// A video with no resolved date can never match a fixture, and
+			// storing it would mask it from a later retry.
+			if t, ok := dates[v.ID]; ok {
+				v.Published = t
+				hydrated = append(hydrated, v)
 			}
+		}
+		d.rememberVideos(hydrated, priv)
+		added += len(hydrated)
+		d.logger.Printf("backfill %s: %d uploads listed, %d recovered", ch, len(listing), len(hydrated))
+	}
+	return added > 0
+}
+
+// knownChannels is every YouTube channel worth polling: those discovered from
+// any tournament page, plus any the user added by hand.
+func (d *Daemon) knownChannels(priv *store.Private) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	for _, info := range priv.TournamentStreams {
+		for _, c := range info.YouTubeChannels {
+			add(c)
+		}
+	}
+	for _, c := range d.cfg.YouTube.Channels {
+		add(c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// rememberVideos folds a feed into the persistent index.
+//
+// A channel's RSS feed carries only its ~15 most recent uploads. During a big
+// event that is a couple of days — the official Dota channel posts every match
+// in four languages — so a fixture played on Tuesday has scrolled out of the
+// feed by Thursday and could never be matched. Remembering what we have seen
+// turns a rolling window into an accumulating index.
+func (d *Daemon) rememberVideos(videos []youtube.Video, priv *store.Private) {
+	if priv.Videos == nil {
+		priv.Videos = map[string]store.StoredVideo{}
+	}
+	for _, v := range videos {
+		if v.ID == "" {
+			continue
+		}
+		priv.Videos[v.ID] = store.StoredVideo{
+			ID: v.ID, Title: v.Title, Channel: v.Channel,
+			Published: v.Published, Thumbnail: v.Thumbnail, Lang: v.Lang,
+		}
+	}
+	// Bound the index: a video older than any plausible catch-up window cannot
+	// match a fixture we still track.
+	cutoff := time.Now().Add(-90 * 24 * time.Hour)
+	for id, v := range priv.Videos {
+		if !v.Published.IsZero() && v.Published.Before(cutoff) {
+			delete(priv.Videos, id)
 		}
 	}
 }

@@ -33,7 +33,6 @@ exact commands, the field values, and the five form confirmations mapped to
 where each is already satisfied. Two decisions gate it: the plugin id (below)
 and the contact address (above).
 
-## Decide the published plugin id
 
 The plugin ships as `contra.esports`, matching your other local plugins. The
 community marketplace recommends a namespaced id such as
