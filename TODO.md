@@ -26,6 +26,13 @@ Note this address will also be visible in the published plugin repo if it ends
 up in a committed config example — the repo currently only references it in
 this file and in `docs/`.
 
+## Publish to the plugin catalog
+
+Everything is prepared and nothing is submitted. `docs/SUBMISSION.md` has the
+exact commands, the field values, and the five form confirmations mapped to
+where each is already satisfied. Two decisions gate it: the plugin id (below)
+and the contact address (above).
+
 ## Decide the published plugin id
 
 The plugin ships as `contra.esports`, matching your other local plugins. The
