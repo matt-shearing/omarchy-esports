@@ -4,10 +4,9 @@ Spoiler-free esports schedule for [Omarchy](https://omarchy.org): a bar widget,
 a desktop app, and a daemon that tracks upcoming matches, ties them to live
 streams, and finds VODs afterwards — without telling you who won.
 
-Covers **Dota 2**, **Counter-Strike** and **StarCraft II** out of the box, with
-**19 games** verified and one command away — League of Legends, VALORANT,
-Rocket League, Overwatch, Apex, PUBG, Call of Duty, Deadlock, Marvel Rivals and
-more.
+**Counter-Strike** and **Dota 2** on first run, with **37 games** verified and
+one toggle away — League of Legends, VALORANT, Rocket League, Overwatch, Apex,
+PUBG, Call of Duty, Deadlock, Marvel Rivals, Halo, Hearthstone, osu! and more.
 
 ---
 
@@ -283,6 +282,45 @@ above.
 Teams known only from the directory have no logo until they next play — the
 ticker is where artwork comes from.
 
+## First run
+
+The app opens a short wizard the first time: which games, which teams, how much
+to hide. Every step writes immediately, so quitting halfway still leaves a
+working config. `omarchy-esports setup --reset` brings it back;
+`--done` skips it.
+
+Only Counter-Strike and Dota 2 are on to begin with. Each enabled game costs a
+30-second parse slot per refresh, so starting narrow keeps a fresh install
+quick, and the wizard is where you widen it.
+
+## Tournament tiers
+
+Liquipedia rates every tournament, and the rating is what separates a major
+from a Tuesday-night cup:
+
+```bash
+omarchy-esports config set minTier 1          # S-Tier only
+omarchy-esports config set hideMinorEvents true
+```
+
+The ticker shows tier filter buttons but carries no tier on the match rows, so
+it comes from each tournament's infobox — a cheap query rather than a page
+parse. Two details make it work honestly:
+
+- **Ticker links point at stage sub-pages.** "The International/2026/Main Event"
+  uses a HiddenDataBox and has no tier of its own, so the lookup walks up to the
+  parent tournament. Without that, coverage was 124 of 198 matches; with it, 154
+  and rising as more tournaments are resolved.
+- **The encoding differs per wiki.** Counter-Strike writes `S-Tier`, Dota 2
+  writes `1`. Both normalise to Liquipedia's numeric scale.
+- **Matches whose tier is not yet known are always kept.** Tiers resolve
+  lazily and are bounded per refresh, so hiding unknowns would make fixtures
+  flicker in and out of the schedule.
+
+`hideMinorEvents` is a separate axis — event format rather than prestige —
+dropping anything tagged Qualifier, Weekly, Monthly or Showmatch. A weekly cup
+can still carry a respectable tier, so the two filters work best together.
+
 ## Settings
 
 The app has a Settings tab covering the blackout policy, catch-up masking and
@@ -343,7 +381,7 @@ omarchy-esports games on valorant
 omarchy-esports games off starcraft2
 ```
 
-The catalog holds 19 wikis, each verified against the live API: the slug
+The catalog holds 37 wikis, each verified against the live API: the slug
 resolves, the ticker page exists, and parsing it returns fixtures in the format
 this tool reads.
 

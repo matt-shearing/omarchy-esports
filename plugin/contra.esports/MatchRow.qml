@@ -138,11 +138,21 @@ Rectangle {
                     font.family: row.bar ? row.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.caption
                 }
+                // Game and format, dimmer than the tournament above it: useful
+                // orientation when several games share one list, but never
+                // competing with the fixture itself.
                 Text {
                     Layout.fillWidth: true
-                    text: row.match ? Model.bestOfLabel(row.match) : ""
+                    text: {
+                        if (!row.match) return ""
+                        var bits = []
+                        var badge = Model.gameBadge(row.match)
+                        if (badge) bits.push(badge)
+                        if (Model.bestOfLabel(row.match)) bits.push(Model.bestOfLabel(row.match))
+                        return bits.join(" · ")
+                    }
                     color: row.fg
-                    opacity: 0.45
+                    opacity: 0.4
                     horizontalAlignment: Text.AlignRight
                     font.family: row.bar ? row.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.caption

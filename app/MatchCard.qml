@@ -15,6 +15,10 @@ Rectangle {
     signal reveal
     signal markWatched
     signal inspectTeam(string name)
+    signal inspectTournament(string name)
+
+    // Set by the VODs view, where clicking a tournament filters to it.
+    property bool tournamentClickable: false
 
     readonly property bool live: match ? Model.isLive(match) : false
     readonly property bool finished: match ? Model.isFinished(match) : false
@@ -77,6 +81,27 @@ Rectangle {
             }
         }
 
+        // Game badge: small and dim, a visual key rather than a label to read.
+        Rectangle {
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: badgeText.implicitWidth + 12
+            Layout.preferredHeight: 18
+            radius: 4
+            visible: badgeText.text !== ""
+            color: Theme.alpha(Theme.foreground, 0.07)
+
+            Text {
+                id: badgeText
+                anchors.centerIn: parent
+                text: Model.gameBadge(card.match)
+                color: Theme.muted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption - 1
+                font.bold: true
+                font.letterSpacing: 0.5
+            }
+        }
+
         // Teams
         RowLayout {
             Layout.fillWidth: true
@@ -117,14 +142,27 @@ Rectangle {
             spacing: 2
 
             Text {
+                id: tournamentLabel
                 Layout.fillWidth: true
                 text: card.match ? card.match.tournament.name : ""
-                color: Theme.foreground
+                color: (card.tournamentClickable && tournamentHover.hovered)
+                    ? Theme.accent : Theme.foreground
                 opacity: 0.8
                 elide: Text.ElideRight
                 horizontalAlignment: Text.AlignRight
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
+                font.underline: card.tournamentClickable && tournamentHover.hovered
+
+                HoverHandler {
+                    id: tournamentHover
+                    enabled: card.tournamentClickable
+                    cursorShape: Qt.PointingHandCursor
+                }
+                TapHandler {
+                    enabled: card.tournamentClickable
+                    onTapped: card.inspectTournament(card.match.tournament.name)
+                }
             }
             Text {
                 Layout.fillWidth: true

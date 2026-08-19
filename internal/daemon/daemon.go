@@ -151,6 +151,9 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 			errs = append(errs, fmt.Sprintf("%s: %v", w.Slug, err))
 			continue
 		}
+		for i := range ms {
+			ms[i].GameShort = w.Short
+		}
 		d.logger.Printf("%s: parsed %d matches", w.Slug, len(ms))
 		all = append(all, ms...)
 	}
@@ -170,6 +173,8 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	if err := d.enrich(ctx, all, &priv); err != nil {
 		d.logger.Printf("enrichment: %v", err)
 	}
+
+	d.fetchTiers(ctx, all, &priv)
 
 	d.indexTeams(all, &priv)
 	d.sweepDirectories(ctx, &priv)
@@ -339,6 +344,107 @@ func (d *Daemon) sweepDirectories(ctx context.Context, priv *store.Private) {
 	}
 }
 
+// maxTierFetches bounds tier lookups per refresh. Each is a cheap query call,
+// but a first run sees dozens of new tournaments at once.
+const maxTierFetches = 12
+
+// tierTTL is how long a cached tier stays fresh. A tournament's tier is set
+// when it is announced and effectively never changes.
+const tierTTL = 30 * 24 * time.Hour
+
+// fetchTiers resolves the Liquipedia tier of each match's tournament and
+// stamps it onto the matches.
+//
+// The ticker shows tier filter buttons but carries no tier on the match rows,
+// so it has to come from the tournament page's infobox. That is a cheap
+// `action=query` for section 0 rather than a full page parse, and the encoding
+// differs by wiki — Counter-Strike writes "S-Tier" where Dota 2 writes "1" —
+// so values are normalised to Liquipedia's numeric scale.
+func (d *Daemon) fetchTiers(ctx context.Context, ms []match.Match, priv *store.Private) {
+	fetches := 0
+	for i := range ms {
+		page := ms[i].Tournament.Page
+		if page == "" {
+			continue
+		}
+		info, cached := priv.TournamentStreams[page]
+		needs := !cached || info.TierAt.IsZero() || time.Since(info.TierAt) > tierTTL
+
+		if needs && fetches < maxTierFetches {
+			tt, err := d.lp.FetchTier(ctx, ms[i].Wiki, page)
+			if err != nil {
+				d.logger.Printf("tier %s: %v", page, err)
+			} else {
+				fetches++
+				info.Tier = tt.Tier
+				info.TierType = tt.Type
+				info.TierAt = time.Now()
+				priv.TournamentStreams[page] = info
+			}
+		}
+
+		ms[i].Tournament.Tier = info.Tier
+		ms[i].Tournament.TierLabel = liquipedia.TierName(info.Tier)
+		ms[i].Tournament.TierType = info.TierType
+	}
+	if fetches > 0 {
+		d.logger.Printf("tiers: resolved %d tournament(s)", fetches)
+	}
+}
+
+// applyTierFilter drops matches below the configured tier.
+//
+// Matches whose tier is not yet known are kept unless the user opts out:
+// tiers are fetched lazily and bounded per refresh, so a newly seen tournament
+// is briefly unknown, and hiding those would make fixtures flicker in and out
+// of the schedule.
+func (d *Daemon) applyTierFilter(ms []match.Match) []match.Match {
+	if d.cfg.MinTier <= 0 && !d.cfg.HideMinorEvents {
+		return ms
+	}
+	out := ms[:0]
+	dropped := 0
+	for _, m := range ms {
+		if d.cfg.HideMinorEvents && isMinorEvent(m.Tournament.TierType) {
+			dropped++
+			continue
+		}
+		if d.cfg.MinTier <= 0 {
+			out = append(out, m)
+			continue
+		}
+		tier := m.Tournament.Tier
+		if tier == 0 {
+			if d.cfg.HideUnknownTier {
+				dropped++
+				continue
+			}
+			out = append(out, m)
+			continue
+		}
+		if tier > d.cfg.MinTier {
+			dropped++
+			continue
+		}
+		out = append(out, m)
+	}
+	if dropped > 0 {
+		d.logger.Printf("tier filter: hid %d match(es) below tier %d", dropped, d.cfg.MinTier)
+	}
+	return out
+}
+
+// minorEventTypes are the `liquipediatiertype` values that mark an event as a
+// side fixture rather than a main tournament.
+var minorEventTypes = map[string]bool{
+	"qualifier": true, "weekly": true, "monthly": true, "showmatch": true,
+	"show match": true, "charity": true, "exhibition": true,
+}
+
+func isMinorEvent(tierType string) bool {
+	return minorEventTypes[strings.ToLower(strings.TrimSpace(tierType))]
+}
+
 // maxLogoFetches bounds how many team logos one refresh may fetch.
 const maxLogoFetches = 6
 
@@ -489,6 +595,14 @@ func (d *Daemon) publish(priv store.Private, errs []string) error {
 	staged := make([]match.Match, len(priv.Matches))
 	copy(staged, priv.Matches)
 
+	// View filters run here rather than at fetch time. The private record
+	// keeps everything known, so toggling a filter takes effect on the next
+	// publish — seconds — instead of waiting for a refresh, which is minutes
+	// away behind the rate limit. It also means turning a filter off restores
+	// the hidden matches without refetching them.
+	staged = d.applyTierFilter(staged)
+	staged = d.applyFollowedFilter(staged)
+
 	if d.cfg.CatchUp.Enabled {
 		staged = spoiler.ApplyCatchUp(staged, spoiler.CatchUpOptions{
 			Teams:    d.cfg.Teams,
@@ -529,13 +643,24 @@ func (d *Daemon) filterAndAnnotate(ms []match.Match, now time.Time) []match.Matc
 		}
 		m.State = m.DeriveState(now, time.Duration(d.cfg.LiveWindow))
 		m.Followed = d.isFollowed(&m)
-		if d.cfg.FollowedOnly && !m.Followed {
-			continue
-		}
 		seen[m.ID] = true
 		out = append(out, m)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].StartsAt.Before(out[j].StartsAt) })
+	return out
+}
+
+// applyFollowedFilter drops matches with no followed team, when asked.
+func (d *Daemon) applyFollowedFilter(ms []match.Match) []match.Match {
+	if !d.cfg.FollowedOnly {
+		return ms
+	}
+	out := ms[:0]
+	for _, m := range ms {
+		if m.Followed {
+			out = append(out, m)
+		}
+	}
 	return out
 }
 

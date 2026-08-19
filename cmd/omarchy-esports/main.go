@@ -60,6 +60,8 @@ func main() {
 		err = cmdWatched(args, true)
 	case "unwatch":
 		err = cmdWatched(args, false)
+	case "setup":
+		err = cmdSetup(args)
 	case "games":
 		err = cmdGames(args)
 	case "search":
@@ -106,6 +108,9 @@ commands:
   hide <id>        re-blind a revealed match
   watched <id>     mark a match watched, advancing the catch-up queue
   unwatch <id>     mark it unwatched again
+  setup            first-run setup: pick games and teams
+                     --reset   show the wizard again next time the app opens
+                     --done    mark setup complete without the wizard
   games            list known games, and turn them on or off
                      list | on <slug>... | off <slug>...
   search <query>   fuzzy-search the team index
@@ -551,6 +556,63 @@ func loadTeamIndex(st *store.Store) ([]store.TeamEntry, error) {
 	return idx.Teams, nil
 }
 
+// cmdSetup drives first-run setup from a terminal, and controls whether the
+// app shows its wizard.
+func cmdSetup(args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	reset := fs.Bool("reset", false, "show the setup wizard again")
+	done := fs.Bool("done", false, "mark setup complete without running it")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	switch {
+	case *reset:
+		cfg.SetupComplete = false
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+		fmt.Println("setup will run again next time the app opens")
+		return nil
+	case *done:
+		cfg.SetupComplete = true
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+		fmt.Println("setup marked complete")
+		return nil
+	}
+
+	// Plain summary plus the commands to finish, rather than a prompt-driven
+	// flow: this runs in scripts and over ssh as often as interactively.
+	fmt.Println("omarchy-esports setup")
+	fmt.Println()
+	fmt.Println("Games currently enabled:")
+	for _, w := range cfg.EnabledWikis() {
+		fmt.Printf("  %-6s %s\n", w.Short, w.Game)
+	}
+	fmt.Printf("\n%d more available — `omarchy-esports games list`\n", len(cfg.Wikis)-len(cfg.EnabledWikis()))
+	fmt.Println()
+	if len(cfg.Teams) == 0 {
+		fmt.Println("No teams followed yet. Find some:")
+		fmt.Println("  omarchy-esports search navi")
+		fmt.Println("  omarchy-esports teams add \"Natus Vincere\" --game counterstrike")
+	} else {
+		fmt.Println("Teams followed:")
+		for _, t := range cfg.Teams {
+			fmt.Println("  " + t.Label())
+		}
+	}
+	fmt.Println()
+	fmt.Println("The app has a guided version of this: omarchy-esports-app")
+	fmt.Println("Mark this done with: omarchy-esports setup --done")
+	return nil
+}
+
 // cmdGames lists and toggles the games polled.
 func cmdGames(args []string) error {
 	cfg, err := config.Load()
@@ -897,7 +959,10 @@ func configSet(key, raw string) error {
 	if err != nil {
 		return err
 	}
-	cfg := config.Default()
+	// Decode into a zero Config, not the defaults: unmarshalling an array into
+	// a slice that already has elements reuses those elements, so absent
+	// fields would inherit values from whichever default sat at that index.
+	var cfg config.Config
 	if err := json.Unmarshal(merged, &cfg); err != nil {
 		return fmt.Errorf("%s = %q is not valid: %w", key, raw, err)
 	}

@@ -8,3 +8,5 @@ MatchCard 1.0 MatchCard.qml
 TeamResultRow 1.0 TeamResultRow.qml
 SettingRow 1.0 SettingRow.qml
 SettingsView 1.0 SettingsView.qml
+GameChip 1.0 GameChip.qml
+SetupWizard 1.0 SetupWizard.qml

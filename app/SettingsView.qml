@@ -95,17 +95,90 @@ ScrollView {
             font.pixelSize: Theme.fontCaption
         }
 
-        Repeater {
-            model: view.config ? view.config.wikis : []
-            delegate: SettingRow {
-                required property var modelData
-                label: modelData.game || modelData.slug
-                help: modelData.slug + " · ticker: " + (modelData.tickerPage || "")
-                AppButton {
-                    text: modelData.enabled ? "On" : "Off"
-                    accentuated: modelData.enabled
-                    onClicked: view.applyWiki(modelData.slug, !modelData.enabled)
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Text {
+                text: {
+                    if (!view.config) return ""
+                    var n = 0
+                    for (var i = 0; i < view.config.wikis.length; i++) if (view.config.wikis[i].enabled) n++
+                    return n + " of " + view.config.wikis.length + " on"
                 }
+                color: Theme.muted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption
+            }
+            Item { Layout.fillWidth: true }
+            AppButton {
+                text: "Turn all off"
+                subtle: true
+                onClicked: {
+                    for (var i = 0; i < view.config.wikis.length; i++) {
+                        if (view.config.wikis[i].enabled) view.applyWiki(view.config.wikis[i].slug, false)
+                    }
+                }
+            }
+        }
+
+        // Tiles rather than rows: with 30-odd games a list is a wall of text,
+        // and the badge doubles as the key used against every fixture.
+        Flow {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Repeater {
+                model: view.config ? view.config.wikis : []
+                delegate: GameChip {
+                    required property var modelData
+                    wiki: modelData
+                    enabled_: modelData.enabled === true
+                    onToggled: view.applyWiki(modelData.slug, !(modelData.enabled === true))
+                }
+            }
+        }
+
+        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.alpha(Theme.foreground, 0.1) }
+
+        // ---- tournaments ----
+        Text {
+            text: "TOURNAMENTS"
+            color: Theme.foreground
+            opacity: 0.5
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontCaption
+            font.bold: true
+            font.letterSpacing: 1
+        }
+
+        SettingRow {
+            label: "Minimum tier"
+            help: "Liquipedia rates every tournament. S-Tier is majors and Internationals; C-Tier is regional and weekly cups. Matches whose tier is not known yet are always kept, so nothing vanishes while it is still being looked up."
+            Repeater {
+                model: [
+                    { v: "0", label: "All" },
+                    { v: "1", label: "S only" },
+                    { v: "2", label: "S+A" },
+                    { v: "3", label: "S+A+B" }
+                ]
+                delegate: AppButton {
+                    required property var modelData
+                    text: modelData.label
+                    accentuated: view.config && String(view.config.minTier || 0) === modelData.v
+                    onClicked: view.apply("minTier", modelData.v)
+                }
+            }
+        }
+
+        SettingRow {
+            label: "Hide qualifiers and weeklies"
+            help: "Drops events tagged Qualifier, Weekly, Monthly or Showmatch. A separate axis from tier — a weekly cup can still carry a respectable one."
+            AppButton {
+                text: (view.config && view.config.hideMinorEvents) ? "On" : "Off"
+                accentuated: view.config && view.config.hideMinorEvents
+                onClicked: view.apply("hideMinorEvents",
+                    (view.config && view.config.hideMinorEvents) ? "false" : "true")
             }
         }
 
@@ -188,6 +261,16 @@ ScrollView {
                     accentuated: view.config && String(view.config.pollInterval).indexOf(modelData) === 0
                     onClicked: view.apply("pollInterval", modelData)
                 }
+            }
+        }
+
+        SettingRow {
+            label: "Run setup again"
+            help: "Reopens the first-run wizard next time the app starts."
+            AppButton {
+                text: "Reset setup"
+                subtle: true
+                onClicked: view.apply("setupComplete", "false")
             }
         }
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 )
@@ -61,8 +62,10 @@ func TestDefaultsCoverTheShippedWikis(t *testing.T) {
 		"counterstrike": "Liquipedia:Matches",
 		"starcraft2":    "Main_Page",
 	}
+	// Check every configured wiki, not only the enabled ones: starcraft2 ships
+	// available-but-off, and its Main_Page quirk must survive regardless.
 	got := map[string]string{}
-	for _, w := range c.EnabledWikis() {
+	for _, w := range c.Wikis {
 		got[w.Slug] = w.TickerPage
 	}
 	for slug, page := range want {
@@ -173,7 +176,12 @@ func TestCatalogIsWellFormed(t *testing.T) {
 			t.Errorf("%s: negative fixture count", e.Slug)
 		}
 	}
-	// The three shipped-on games must be present.
+	// Every game must carry a short badge for the UI.
+	for _, e := range Catalog {
+		if e.Short == "" || len(e.Short) > 5 {
+			t.Errorf("%s: short badge %q must be 1-5 chars", e.Slug, e.Short)
+		}
+	}
 	for _, slug := range []string{"counterstrike", "dota2", "starcraft2"} {
 		if _, ok := CatalogFor(slug); !ok {
 			t.Errorf("catalog is missing default game %q", slug)
@@ -189,23 +197,94 @@ func TestCatalogIsWellFormed(t *testing.T) {
 	}
 }
 
-// TestDefaultWikisEnablesOnlyTheShippedThree keeps the catalog from silently
-// turning on every game, which would multiply the refresh cost.
-func TestDefaultWikisEnablesOnlyTheShippedThree(t *testing.T) {
+// TestDefaultWikisStartNarrow keeps the catalog from silently turning on every
+// game: each enabled game costs a 30-second parse slot per refresh, so a fresh
+// install must start small and let the wizard widen it.
+func TestDefaultWikisStartNarrow(t *testing.T) {
 	on := map[string]bool{}
 	for _, w := range Default().EnabledWikis() {
 		on[w.Slug] = true
 	}
-	if len(on) != 3 {
-		t.Errorf("expected 3 games enabled by default, got %d: %v", len(on), on)
+	if len(on) != 2 {
+		t.Errorf("expected 2 games enabled by default, got %d: %v", len(on), on)
 	}
-	for _, slug := range []string{"counterstrike", "dota2", "starcraft2"} {
+	for _, slug := range []string{"counterstrike", "dota2"} {
 		if !on[slug] {
 			t.Errorf("%s should be enabled by default", slug)
 		}
 	}
+	if on["starcraft2"] {
+		t.Error("starcraft2 should be available but off by default")
+	}
 	// Everything else must be present but dormant.
 	if len(Default().Wikis) != len(Catalog) {
 		t.Errorf("default config has %d wikis, catalog has %d", len(Default().Wikis), len(Catalog))
+	}
+}
+
+// TestLoadDoesNotInheritDefaultSliceElements guards a subtle json.Unmarshal
+// behaviour: decoding an array into a slice that already has elements reuses
+// those elements, so fields absent from the file keep the default's value at
+// that index. With defaults holding the full game catalog, a config listing
+// four wikis in a different order silently paired each with the wrong short
+// badge — dota2 rendered as "CS2".
+func TestLoadDoesNotInheritDefaultSliceElements(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	raw := `{"wikis":[
+      {"slug":"dota2","game":"Dota 2","tickerPage":"Liquipedia:Matches","enabled":true},
+      {"slug":"counterstrike","game":"Counter-Strike","tickerPage":"Liquipedia:Matches","enabled":true}
+    ]}`
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"dota2": "DOTA2", "counterstrike": "CS2"}
+	for _, w := range cfg.Wikis {
+		if exp, ok := want[w.Slug]; ok && w.Short != exp {
+			t.Errorf("%s got short %q, want %q — slice elements leaked between entries",
+				w.Slug, w.Short, exp)
+		}
+		// Every entry must agree with the catalog on its own identity.
+		if e, ok := CatalogFor(w.Slug); ok && w.Game != e.Game {
+			t.Errorf("%s got game %q, want %q", w.Slug, w.Game, e.Game)
+		}
+	}
+}
+
+// TestLoadRepairsWrongShortBadges covers configs already written with badges
+// belonging to another game, from the slice-reuse bug.
+func TestLoadRepairsWrongShortBadges(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	raw := `{"wikis":[
+      {"slug":"dota2","game":"Dota 2","short":"CS2","tickerPage":"Liquipedia:Matches","enabled":true},
+      {"slug":"valorant","game":"VALORANT","short":"LOL","tickerPage":"Liquipedia:Matches","enabled":true}
+    ]}`
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"dota2": "DOTA2", "valorant": "VAL"}
+	for _, w := range cfg.Wikis {
+		if exp, ok := want[w.Slug]; ok && w.Short != exp {
+			t.Errorf("%s kept the wrong badge %q, want %q", w.Slug, w.Short, exp)
+		}
 	}
 }

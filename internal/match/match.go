@@ -74,7 +74,13 @@ type Tournament struct {
 	Name string `json:"name"`
 	Page string `json:"page,omitempty"`
 	Icon string `json:"icon,omitempty"`
-	Tier string `json:"tier,omitempty"`
+	// Tier is Liquipedia's numeric tier, 1 (premier) to 5, or 0 when unknown.
+	// The ticker does not carry it; it comes from the tournament page.
+	Tier int `json:"tier,omitempty"`
+	// TierLabel is the display form, e.g. "S-Tier".
+	TierLabel string `json:"tierLabel,omitempty"`
+	// TierType qualifies the event: "Qualifier", "Weekly", "Showmatch".
+	TierType string `json:"tierType,omitempty"`
 }
 
 // Stream is a live broadcast channel.
@@ -106,9 +112,11 @@ type VOD struct {
 
 // Match is one scheduled, live, or completed series.
 type Match struct {
-	ID         string      `json:"id"`
-	Wiki       string      `json:"wiki"`
-	Game       string      `json:"game"`
+	ID   string `json:"id"`
+	Wiki string `json:"wiki"`
+	Game string `json:"game"`
+	// GameShort is the compact badge shown against a fixture, e.g. "CS2".
+	GameShort  string      `json:"gameShort,omitempty"`
 	StartsAt   time.Time   `json:"startsAt"`
 	Opponents  [2]Opponent `json:"opponents"`
 	BestOf     int         `json:"bestOf,omitempty"`

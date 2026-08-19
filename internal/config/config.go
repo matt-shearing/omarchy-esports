@@ -30,6 +30,8 @@ type Wiki struct {
 	Slug string `json:"slug"`
 	// Game is the display name, e.g. "Dota 2".
 	Game string `json:"game"`
+	// Short is the compact badge shown against a fixture, e.g. "CS2".
+	Short string `json:"short,omitempty"`
 	// TickerPage is the page carrying the upcoming-match ticker. This differs
 	// per wiki: most use "Liquipedia:Matches", but starcraft2's copy of that
 	// page is a stale archive and its live ticker lives on Main_Page.
@@ -126,6 +128,23 @@ type Config struct {
 	// HideTBD drops bracket slots whose opponents are not seeded yet.
 	HideTBD bool `json:"hideTBD"`
 
+	// MinTier hides matches from tournaments below the given Liquipedia tier:
+	// 1 keeps only premier events, 2 adds A-Tier, and so on. Zero disables the
+	// filter. Matches whose tier could not be determined are kept — see
+	// HideUnknownTier.
+	MinTier int `json:"minTier"`
+
+	// HideMinorEvents drops qualifiers, weeklies, monthlies and showmatches,
+	// using the tournament's `liquipediatiertype`. This is a different axis
+	// from tier — event format rather than prestige — and is often the more
+	// useful filter, since a weekly cup can still be tagged a decent tier.
+	HideMinorEvents bool `json:"hideMinorEvents"`
+
+	// HideUnknownTier also drops matches whose tournament has no tier yet.
+	// Off by default: tier is fetched lazily, so a newly seen tournament is
+	// briefly unknown, and hiding those would make matches flicker in and out.
+	HideUnknownTier bool `json:"hideUnknownTier"`
+
 	// CatchUp controls the backlog masking described in package spoiler: when
 	// you have unwatched matches for a followed team, that team's later
 	// fixtures have their opponent withheld, because knowing who they play
@@ -147,6 +166,12 @@ type Config struct {
 	// LiquipediaAPIKey enables the structured LPDB v3 API. Optional — the
 	// keyless ticker path is used when this is empty.
 	LiquipediaAPIKey string `json:"liquipediaApiKey,omitempty"`
+
+	// SetupComplete records that the user has been through first-run setup.
+	// Until then the app shows a wizard instead of the schedule, because an
+	// empty follow list and two default games are a poor first impression of
+	// what the tool does.
+	SetupComplete bool `json:"setupComplete"`
 
 	// ContactEmail is embedded in the User-Agent, as Liquipedia's API terms
 	// of use require a way to contact the operator.
@@ -209,11 +234,16 @@ func Default() Config {
 	}
 }
 
-// defaultWikis enables the games shipped on by default and offers the rest of
-// the catalog pre-configured but dormant, so turning one on is a toggle rather
-// than a research exercise.
+// defaultWikis enables the two biggest scenes on a fresh install and offers
+// the rest of the catalog pre-configured but dormant, so turning one on is a
+// toggle rather than a research exercise.
+//
+// Starting narrow matters: every enabled game costs a 30-second parse slot per
+// refresh, so a default of "everything" would make a new install slow and
+// noisy before the user has expressed any preference. The setup wizard is
+// where they widen it.
 func defaultWikis() []Wiki {
-	on := map[string]bool{"dota2": true, "counterstrike": true, "starcraft2": true}
+	on := map[string]bool{"counterstrike": true, "dota2": true}
 	out := make([]Wiki, 0, len(Catalog))
 	for _, e := range Catalog {
 		out = append(out, e.Wiki(on[e.Slug]))
@@ -246,16 +276,54 @@ func Load() (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	// Unmarshal over the defaults so a partial config file keeps sane values
-	// for anything it omits.
+
+	// Unmarshalling over the defaults keeps sane values for anything the file
+	// omits — but Go's json.Unmarshal REUSES the elements of an existing
+	// slice rather than replacing them, so a shorter array in the file leaves
+	// each element carrying leftover fields from the default at that index.
+	// That silently paired every game with the wrong short badge: the file's
+	// first wiki (dota2) inherited "CS2" from the default catalog's first
+	// entry. Clearing the slices first forces them to be rebuilt from the
+	// file, and they are restored below when the file omits them entirely.
+	defaults := cfg
+	cfg.Wikis = nil
+	cfg.Teams = nil
+
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parsing %s: %w", Path(), err)
+	}
+	if cfg.Wikis == nil {
+		cfg.Wikis = defaults.Wikis
+	}
+	if cfg.Teams == nil {
+		cfg.Teams = defaults.Teams
 	}
 	cfg.clamp()
 	return cfg, nil
 }
 
 func (c *Config) clamp() {
+	// Short is catalog metadata rather than a user preference, so the catalog
+	// is always authoritative. Backfilling only when empty is not enough: an
+	// earlier json.Unmarshal slice-reuse bug wrote badges belonging to other
+	// games into existing configs, and those files need repairing rather than
+	// preserving.
+	for i := range c.Wikis {
+		if e, ok := CatalogFor(c.Wikis[i].Slug); ok {
+			c.Wikis[i].Short = e.Short
+		}
+	}
+	// Offer catalog games the config predates, dormant.
+	known := map[string]bool{}
+	for _, w := range c.Wikis {
+		known[w.Slug] = true
+	}
+	for _, e := range Catalog {
+		if !known[e.Slug] {
+			c.Wikis = append(c.Wikis, e.Wiki(false))
+		}
+	}
+
 	if time.Duration(c.PollInterval) < MinPollInterval {
 		c.PollInterval = Duration(MinPollInterval)
 	}
@@ -276,7 +344,13 @@ func (c *Config) clamp() {
 }
 
 // Save atomically writes the config.
+//
+// Normalisation runs here rather than only in Load, so every writer goes
+// through the same correction. `config set` builds its value by decoding into
+// a defaults-populated struct, which is exactly the path that used to write
+// mismatched game badges back to disk.
 func Save(c Config) error {
+	c.clamp()
 	if err := os.MkdirAll(Dir(), 0o755); err != nil {
 		return err
 	}

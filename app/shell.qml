@@ -25,7 +25,14 @@ ShellRoot {
     property string teamQuery: ""
     // Empty means every game; otherwise a wiki slug.
     property string gameFilter: ""
+    // VODs view filters.
+    property bool vodFollowedOnly: false
+    property string vodTournament: ""
     property var config: Model.parseConfig("")
+    // Shown until first-run setup is done. Held locally as well so finishing
+    // the wizard takes effect immediately rather than waiting for the config
+    // file to round-trip through the CLI.
+    property bool setupDone: false
 
     readonly property string home: Quickshell.env("HOME") || ""
     readonly property string stateDir: home + "/.local/state/omarchy-esports"
@@ -58,7 +65,10 @@ ShellRoot {
         path: app.configPath
         watchChanges: true
         printErrors: false
-        onLoaded: app.config = Model.parseConfig(text())
+        onLoaded: {
+            app.config = Model.parseConfig(text())
+            if (app.config.setupComplete) app.setupDone = true
+        }
         onLoadFailed: app.config = Model.parseConfig("")
         onFileChanged: reload()
     }
@@ -110,6 +120,11 @@ ShellRoot {
 
     function applyWiki(slug, on) {
         app.run(["config", "wiki", slug, on ? "on" : "off"], "saving…")
+    }
+
+    function finishSetup() {
+        app.setupDone = true
+        app.run(["setup", "--done"], "saving…")
     }
 
     function watch(m) {
@@ -166,7 +181,11 @@ ShellRoot {
         return out
     }
 
-    readonly property var vods: Model.vodSections(model.matches)
+    readonly property var vods: Model.vodSections(model.matches, {
+        followedOnly: vodFollowedOnly,
+        tournament: vodTournament
+    })
+    readonly property var vodTournaments: Model.tournamentsWithVods(model.matches)
     readonly property var searchResults: Model.searchTeams(teamIndex, teamQuery,
         { minChars: 2, limit: 20, wiki: gameFilter })
     readonly property var indexGames: Model.gamesInIndex(teamIndex)
@@ -185,10 +204,24 @@ ShellRoot {
 
         onClosed: Qt.quit()
 
+        SetupWizard {
+            anchors.fill: parent
+            anchors.margins: 18
+            visible: app.config.ok && !app.setupDone
+            config: app.config
+            teamIndex: app.teamIndex
+            followed: app.model.teams
+            onApply: function (key, value) { app.applySetting(key, value) }
+            onApplyWiki: function (slug, on) { app.applyWiki(slug, on) }
+            onFollowTeam: function (name, wiki) { app.toggleFollow(name, wiki) }
+            onFinished: app.finishSetup()
+        }
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 18
             spacing: 14
+            visible: !(app.config.ok && !app.setupDone)
 
             // ---- header ----
             RowLayout {
@@ -322,17 +355,75 @@ ShellRoot {
                             onWatch: app.watch(modelData)
                             onReveal: app.run(["reveal", modelData.id], "revealing…")
                             onMarkWatched: app.run(["watched", modelData.id], "updating…")
-                            onInspectTeam: function (name) { app.selectedTeam = name }
+                            onInspectTeam: function (name) {
+                                app.selectedTeam = name
+                                app.selectedTeamWiki = modelData.wiki || ""
+                            }
                         }
                     }
                 }
 
                 // 1 — VODs and the catch-up queue
-                Item {
+                ColumnLayout {
+                    spacing: 10
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        AppButton {
+                            text: "My teams"
+                            accentuated: app.vodFollowedOnly
+                            onClicked: app.vodFollowedOnly = !app.vodFollowedOnly
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 1
+                            Layout.preferredHeight: 18
+                            color: Theme.alpha(Theme.foreground, 0.15)
+                        }
+
+                        AppButton {
+                            text: "All events"
+                            accentuated: app.vodTournament === ""
+                            onClicked: app.vodTournament = ""
+                        }
+
+                        // The active tournament filter, set by clicking a
+                        // tournament name on any card below.
+                        AppButton {
+                            visible: app.vodTournament !== ""
+                            text: "✕ " + app.vodTournament
+                            accentuated: true
+                            onClicked: app.vodTournament = ""
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: app.vodTournament === "" && app.vodTournaments.length > 0
+                                ? "click an event name to filter"
+                                : ""
+                            color: Theme.muted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                        }
+                    }
+
+                    Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
                     Text {
                         anchors.centerIn: parent
                         visible: vodList.count === 0
-                        text: "No recordings yet.\n\nVODs appear once a followed team's match finishes\nand the broadcaster uploads it."
+                        text: {
+                            if (app.vodTournament !== "")
+                                return "No recordings for " + app.vodTournament + "."
+                            if (app.vodFollowedOnly)
+                                return "No recordings for your teams yet.\n\nTurn off \"My teams\" to see everything."
+                            return "No recordings yet.\n\nVODs appear once a match finishes and the\nbroadcaster uploads it."
+                        }
                         color: Theme.muted
                         horizontalAlignment: Text.AlignHCenter
                         font.family: Theme.fontFamily
@@ -400,13 +491,19 @@ ShellRoot {
                                     match: modelData.match
                                     teams: app.model.teams
                                     nowMs: app.nowMs
+                                    tournamentClickable: true
                                     onWatch: app.watch(modelData.match)
                                     onReveal: app.run(["reveal", modelData.match.id], "revealing…")
                                     onMarkWatched: app.run(["watched", modelData.match.id], "updating…")
-                                    onInspectTeam: function (name) { app.selectedTeam = name }
+                                    onInspectTeam: function (name) {
+                                        app.selectedTeam = name
+                                        app.selectedTeamWiki = modelData.match.wiki || ""
+                                    }
+                                    onInspectTournament: function (name) { app.vodTournament = name }
                                 }
                             }
                         }
+                    }
                     }
                 }
 

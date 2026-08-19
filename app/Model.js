@@ -101,6 +101,14 @@ function bestOfLabel(match) {
   return match.bestOf > 0 ? "Bo" + match.bestOf : ""
 }
 
+// gameBadge is the compact game label shown against a fixture, e.g. "CS2".
+// Falls back to the full name, then the wiki slug, so a game added before the
+// badge existed still labels itself.
+function gameBadge(match) {
+  if (!match) return ""
+  return match.gameShort || match.game || match.wiki || ""
+}
+
 // preferredStream picks what to open when the user clicks a match: an English
 // Twitch feed where available, then any English feed, then anything.
 function preferredStream(match) {
@@ -313,17 +321,40 @@ function vodUrl(match) {
 //
 // The queue is ordered oldest first, because watching out of order is exactly
 // what spoils a bracket.
-function vodSections(matches) {
+function vodSections(matches, opts) {
+  opts = opts || {}
   var queue = [], rest = []
   for (var i = 0; i < matches.length; i++) {
     var m = matches[i]
     if (!isFinished(m)) continue
+    if (opts.followedOnly && !m.followed) continue
+    if (opts.tournament && String(m.tournament.name || "") !== String(opts.tournament)) continue
     if (m.queueHead === true || isMasked(m)) queue.push(m)
     else if (hasVod(m)) rest.push(m)
   }
   queue.sort(function (a, b) { return startMs(a) - startMs(b) })
   rest.sort(function (a, b) { return startMs(b) - startMs(a) })
   return { queue: queue, rest: rest }
+}
+
+// tournamentsWithVods lists the tournaments that have recordings, so the VODs
+// view can offer them as a filter.
+function tournamentsWithVods(matches) {
+  var counts = {}
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i]
+    if (!isFinished(m) || !hasVod(m)) continue
+    var name = String(m.tournament.name || "")
+    if (!name) continue
+    counts[name] = (counts[name] || 0) + 1
+  }
+  var out = []
+  for (var name in counts) out.push({ name: name, count: counts[name] })
+  out.sort(function (a, b) {
+    if (b.count !== a.count) return b.count - a.count
+    return a.name.localeCompare(b.name)
+  })
+  return out
 }
 
 // teamMatches returns everything involving a team, upcoming first.
@@ -432,7 +463,8 @@ function searchTeams(index, query, opts) {
 // one place.
 function parseConfig(text) {
   var empty = {
-    ok: false, spoilers: "strict", followedOnly: false, hideTBD: true,
+    ok: false, setupComplete: true, spoilers: "strict", followedOnly: false, hideTBD: true,
+    minTier: 0, hideMinorEvents: false,
     catchUp: { enabled: true, window: "48h0m0s" },
     wikis: [], notifications: {}, pollInterval: "15m0s", contactEmail: ""
   }
@@ -441,6 +473,11 @@ function parseConfig(text) {
     var d = JSON.parse(text)
     return {
       ok: true,
+      // Default to complete when absent, so an existing install never gets
+      // the wizard sprung on it by an upgrade.
+      setupComplete: d.setupComplete !== false,
+      minTier: d.minTier || 0,
+      hideMinorEvents: d.hideMinorEvents === true,
       spoilers: d.spoilers || "strict",
       followedOnly: d.followedOnly === true,
       hideTBD: d.hideTBD !== false,

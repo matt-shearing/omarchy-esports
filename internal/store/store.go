@@ -111,6 +111,12 @@ type TournamentInfo struct {
 	FetchedAt       time.Time      `json:"fetchedAt"`
 	Streams         []match.Stream `json:"streams"`
 	YouTubeChannels []string       `json:"youtubeChannels"`
+	// Tier is cached separately from streams: it comes from a cheap infobox
+	// query rather than the expensive page parse, so it is often known for
+	// tournaments whose streams have not been fetched.
+	Tier     int       `json:"tier,omitempty"`
+	TierType string    `json:"tierType,omitempty"`
+	TierAt   time.Time `json:"tierAt,omitempty"`
 }
 
 // CurrentVersion is the state schema version.
