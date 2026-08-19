@@ -237,14 +237,49 @@ func (c *LogoCache) Fetch(ctx context.Context, rawURL, userAgent string) (string
 		// MediaWiki will not upscale: asking for a 128px thumbnail of an
 		// original narrower than that 404s. Fall back to the original file,
 		// which is small anyway for such logos.
+		//
+		// The fallback must be stored under the key that was REQUESTED, not
+		// the key of the URL it ended up fetching. Storing it under the
+		// original's key left the file on disk but invisible to every lookup,
+		// which silently cost roughly half the artwork.
 		if orig := originalOf(rawURL); orig != "" && orig != rawURL {
-			return c.Fetch(ctx, orig, userAgent)
+			resp.Body.Close()
+			return c.download(ctx, orig, path, userAgent)
 		}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("logo %s: %s", rawURL, resp.Status)
 	}
+	return c.save(resp.Body, path)
+}
 
+// download fetches one URL and stores it under an explicit path, so a fallback
+// is cached under the key the caller will look it up by.
+func (c *LogoCache) download(ctx context.Context, rawURL, path, userAgent string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		c.mu.Lock()
+		c.backoffUntil[hostOf(rawURL)] = time.Now().Add(logoBackoff)
+		c.mu.Unlock()
+		return "", ErrBackoff
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("logo %s: %s", rawURL, resp.Status)
+	}
+	return c.save(resp.Body, path)
+}
+
+// save writes a response body to the cache atomically.
+func (c *LogoCache) save(body io.Reader, path string) (string, error) {
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return "", err
 	}
@@ -254,7 +289,7 @@ func (c *LogoCache) Fetch(ctx context.Context, rawURL, userAgent string) (string
 		return "", err
 	}
 	// 4MB is generous for a team logo and bounds a misbehaving response.
-	if _, err := io.Copy(f, io.LimitReader(resp.Body, 4<<20)); err != nil {
+	if _, err := io.Copy(f, io.LimitReader(body, 4<<20)); err != nil {
 		f.Close()
 		os.Remove(tmp)
 		return "", err

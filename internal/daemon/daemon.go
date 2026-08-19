@@ -478,18 +478,23 @@ func (d *Daemon) localiseArtwork(ms []match.Match) {
 		for j := range ms[i].Opponents {
 			o := &ms[i].Opponents[j]
 
-			// A curated source on the org's own CDN stands in for both
-			// variants; Liquipedia's pair is preferred when cached, since it
-			// is theme-aware.
-			if p := d.logos.Resolve(o.Logo.Light); p != "" {
-				o.Logo.Local = p
-				o.Logo.Light = "file://" + p
-			}
-			if p := d.logos.Resolve(o.Logo.Dark); p != "" {
-				if o.Logo.Local == "" {
+			// Resolve against the canonical URL, which is what the cache is
+			// keyed on. The ticker hands out per-size thumbnails, so looking
+			// up the raw URL misses a file that is sitting right there under
+			// its 128px name.
+			if !strings.HasPrefix(o.Logo.Light, "file://") {
+				if p := d.logos.Resolve(liquipedia.CanonicalLogoURL(o.Logo.Light)); p != "" {
 					o.Logo.Local = p
+					o.Logo.Light = "file://" + p
 				}
-				o.Logo.Dark = "file://" + p
+			}
+			if !strings.HasPrefix(o.Logo.Dark, "file://") {
+				if p := d.logos.Resolve(liquipedia.CanonicalLogoURL(o.Logo.Dark)); p != "" {
+					if o.Logo.Local == "" {
+						o.Logo.Local = p
+					}
+					o.Logo.Dark = "file://" + p
+				}
 			}
 			if o.Logo.Local != "" {
 				continue
@@ -524,8 +529,14 @@ func logoPriority(m *match.Match, now time.Time) int {
 }
 
 // maxLogoDownloads bounds artwork downloads per refresh. Logos never change,
-// so this only applies to teams seen for the first time.
-const maxLogoDownloads = 60
+// so this only applies to teams seen for the first time — a cold start, or a
+// game the user has just switched on.
+//
+// Downloads are paced at one per 400ms, so this ceiling is about two minutes
+// of trickle in the worst case, well inside a poll interval. It was 60, which
+// meant enabling a game left the schedule half-illustrated for three or four
+// refresh cycles.
+const maxLogoDownloads = 250
 
 // cacheLogos downloads team artwork to disk and rewrites each logo to point at
 // the local copy.

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -166,5 +167,35 @@ func TestOriginalOf(t *testing.T) {
 	}
 	if originalOf("https://example.com/logo.png") != "" {
 		t.Error("a non-thumbnail URL has no original to fall back to")
+	}
+}
+
+// TestFallbackStoresUnderRequestedKey: when a 128px thumbnail 404s and the
+// original is fetched instead, it must be cached under the key the caller will
+// look it up by. Storing it under the fallback URL's own key left files on
+// disk that no lookup could ever find.
+func TestFallbackStoresUnderRequestedKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Mimic MediaWiki: the thumbnail 404s, the original serves.
+		if strings.Contains(r.URL.Path, "/thumb/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Write([]byte("\x89PNG original"))
+	}))
+	defer srv.Close()
+
+	c := NewLogoCache(t.TempDir())
+	requested := srv.URL + "/commons/images/thumb/2/2c/Logo.png/128px-Logo.png"
+
+	got, err := c.Fetch(context.Background(), requested, "test")
+	if err != nil {
+		t.Fatalf("fallback failed: %v", err)
+	}
+	if got != c.Path(requested) {
+		t.Errorf("stored at %s, want the requested key %s", got, c.Path(requested))
+	}
+	if !c.Has(requested) {
+		t.Error("the requested URL should now resolve from cache")
 	}
 }
