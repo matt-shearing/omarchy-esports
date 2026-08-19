@@ -199,3 +199,56 @@ func TestFallbackStoresUnderRequestedKey(t *testing.T) {
 		t.Error("the requested URL should now resolve from cache")
 	}
 }
+
+// TestRawURLNeverResolves documents the trap behind two separate bugs: the
+// cache is keyed on the CANONICAL url, but the ticker stores a per-size
+// thumbnail verbatim. Looking a raw ticker url up in the cache always misses,
+// so any caller must canonicalise first.
+func TestRawURLNeverResolves(t *testing.T) {
+	const base = "https://liquipedia.net/commons/images"
+	raw := base + "/thumb/a/a2/Team_X.png/50px-Team_X.png"
+	canonical := CanonicalLogoURL(raw)
+
+	c := NewLogoCache(t.TempDir())
+	// Simulate a cached logo by writing the file the canonical key points at.
+	if _, err := c.save(strings.NewReader("\x89PNG"), c.Path(canonical)); err != nil {
+		t.Fatal(err)
+	}
+
+	if c.Has(raw) {
+		t.Error("the raw per-size url must not resolve; callers have to canonicalise")
+	}
+	if !c.Has(canonical) {
+		t.Fatal("the canonical url should resolve")
+	}
+	// Which is the whole point: canonicalising turns the miss into a hit.
+	if !c.Has(CanonicalLogoURL(raw)) {
+		t.Error("canonicalising the raw url should hit the same cache entry")
+	}
+}
+
+// TestFallbackRespectsBackoff: the 404 fallback goes through the same per-host
+// pause as any other request. It previously bypassed it entirely.
+func TestFallbackRespectsBackoff(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusNotFound) // thumbnail missing, would trigger fallback
+	}))
+	defer srv.Close()
+
+	c := NewLogoCache(t.TempDir())
+	c.SetBackoffUntil(time.Now().Add(10 * time.Minute))
+	// SetBackoffUntil pauses liquipedia.net specifically; pause this host too.
+	c.mu.Lock()
+	c.backoffUntil[hostOf(srv.URL)] = time.Now().Add(10 * time.Minute)
+	c.mu.Unlock()
+
+	_, err := c.Fetch(context.Background(), srv.URL+"/commons/images/thumb/a/a1/L.png/128px-L.png", "test")
+	if !errors.Is(err, ErrBackoff) {
+		t.Errorf("got %v, want ErrBackoff", err)
+	}
+	if hits != 0 {
+		t.Errorf("server was hit %d times while paused", hits)
+	}
+}

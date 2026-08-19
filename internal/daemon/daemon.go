@@ -528,15 +528,18 @@ func logoPriority(m *match.Match, now time.Time) int {
 	return p
 }
 
-// maxLogoDownloads bounds artwork downloads per refresh. Logos never change,
-// so this only applies to teams seen for the first time — a cold start, or a
-// game the user has just switched on.
+// maxLogoDownloads bounds artwork fetch ATTEMPTS per refresh. Logos never
+// change, so this only applies to teams seen for the first time — a cold
+// start, or a game the user has just switched on.
 //
-// Downloads are paced at one per 400ms, so this ceiling is about two minutes
-// of trickle in the worst case, well inside a poll interval. It was 60, which
-// meant enabling a game left the schedule half-illustrated for three or four
-// refresh cycles.
+// It was 60, which left a newly enabled game half-illustrated for three or
+// four refresh cycles.
 const maxLogoDownloads = 250
+
+// logoSweepBudget bounds the sweep in wall-clock time, which the attempt count
+// alone cannot: a slow or unreachable host makes every attempt cost far more
+// than the 400ms pacing assumes.
+const logoSweepBudget = 45 * time.Second
 
 // cacheLogos downloads team artwork to disk and rewrites each logo to point at
 // the local copy.
@@ -556,7 +559,14 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 	// which is exactly backwards.
 	paused := d.logos.BackingOff()
 	ua := d.lp.UserAgent()
-	downloads := 0
+	downloads, attempts := 0, 0
+
+	// Bound the sweep in wall-clock time as well as in attempts. RefreshOnce
+	// holds d.mu for its whole body and Reevaluate takes the same lock, so a
+	// long sweep stalls the 30-second tick that makes follow toggles and
+	// live/upcoming transitions feel immediate.
+	deadline := time.Now().Add(logoSweepBudget)
+	spent := func() bool { return attempts >= maxLogoDownloads || time.Now().After(deadline) }
 
 	// localiseTeam resolves one opponent's artwork, preferring what is already
 	// on disk, then a curated source on the org's own CDN, then Liquipedia.
@@ -578,9 +588,10 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 			l.Light, l.Dark, l.Local = "file://"+p, "file://"+p, p
 			return true
 		}
-		if paused || downloads >= maxLogoDownloads {
+		if paused || spent() {
 			return false
 		}
+		attempts++
 		if _, err := d.logos.Fetch(ctx, url, ua); err != nil {
 			if !errors.Is(err, liquipedia.ErrBackoff) {
 				d.logger.Printf("curated logo %s: %v", name, err)
@@ -609,9 +620,14 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 			if remote == "" || d.logos.Has(remote) {
 				continue
 			}
-			if paused || downloads >= maxLogoDownloads {
+			if paused || spent() {
 				continue
 			}
+			// Count the attempt, not the success: failures still pay the
+			// pacing cost, so counting only successes let an unreachable host
+			// pace through every url in the schedule while the cap never
+			// engaged.
+			attempts++
 			if _, err := d.logos.Fetch(ctx, remote, ua); err != nil {
 				if errors.Is(err, liquipedia.ErrBackoff) {
 					return // stop the whole sweep, not just this file
@@ -651,13 +667,22 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 	for _, i := range order {
 		for j := range ms[i].Opponents {
 			o := &ms[i].Opponents[j]
-			// Curated first when Liquipedia's copy is not already on disk:
-			// it is a different host, so it still works when Liquipedia has
-			// rate-limited us.
-			if d.logos.Resolve(o.Logo.Light) == "" && localiseCurated(o.Name, &o.Logo) {
-				continue
-			}
+			// Liquipedia first, curated as the fallback.
+			//
+			// Liquipedia ships separate light and dark artwork for a third of
+			// teams, which the UI needs to follow the omarchy theme; a curated
+			// source is a single file that cannot. So the theme-aware pair
+			// wins whenever it can be had, and the curated source — on the
+			// org's own CDN — covers the case that matters: Liquipedia
+			// refusing us, or having no artwork for that team at all.
+			//
+			// Trying curated first, as this did, was self-perpetuating: those
+			// teams never had Liquipedia's copy fetched, so it was never
+			// cached, so curated won again next time.
 			localise(&o.Logo)
+			if o.Logo.Local == "" {
+				localiseCurated(o.Name, &o.Logo)
+			}
 		}
 	}
 	// The team index feeds search results, which render the same artwork.

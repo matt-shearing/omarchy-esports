@@ -197,23 +197,8 @@ func (c *LogoCache) Fetch(ctx context.Context, rawURL, userAgent string) (string
 	}
 	path := c.Path(rawURL)
 
-	c.mu.Lock()
-	if time.Now().Before(c.backoffUntil[hostOf(rawURL)]) {
-		c.mu.Unlock()
-		return "", ErrBackoff
-	}
-	wait := time.Until(c.last.Add(logoInterval))
-	if wait < 0 {
-		wait = 0
-	}
-	c.last = time.Now().Add(wait)
-	c.mu.Unlock()
-	if wait > 0 {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(wait):
-		}
+	if err := c.acquire(ctx, rawURL); err != nil {
+		return "", err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -253,9 +238,47 @@ func (c *LogoCache) Fetch(ctx context.Context, rawURL, userAgent string) (string
 	return c.save(resp.Body, path)
 }
 
+// acquire enforces the per-host pause and the download pacing.
+//
+// Both the normal path and the 404 fallback go through it. When the fallback
+// bypassed this, a narrow logo fired its retry with no gap at all and left the
+// pacing clock unaware the request had happened — so a cold sweep against a
+// host that had already refused us went out in back-to-back pairs.
+func (c *LogoCache) acquire(ctx context.Context, rawURL string) error {
+	c.mu.Lock()
+	if time.Now().Before(c.backoffUntil[hostOf(rawURL)]) {
+		c.mu.Unlock()
+		return ErrBackoff
+	}
+	wait := time.Until(c.last.Add(logoInterval))
+	if wait < 0 {
+		wait = 0
+	}
+	c.last = time.Now().Add(wait)
+	c.mu.Unlock()
+
+	if wait <= 0 {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(wait):
+		return nil
+	}
+}
+
 // download fetches one URL and stores it under an explicit path, so a fallback
 // is cached under the key the caller will look it up by.
 func (c *LogoCache) download(ctx context.Context, rawURL, path, userAgent string) (string, error) {
+	// Another size of the same logo may already have fallen back to this same
+	// original, in which case there is nothing to fetch.
+	if fileHasContent(path) {
+		return path, nil
+	}
+	if err := c.acquire(ctx, rawURL); err != nil {
+		return "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", err
