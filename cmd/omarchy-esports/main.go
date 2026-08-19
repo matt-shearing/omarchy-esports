@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,6 +63,8 @@ func main() {
 		err = cmdWatched(args, false)
 	case "setup":
 		err = cmdSetup(args)
+	case "logos":
+		err = cmdLogos(args)
 	case "games":
 		err = cmdGames(args)
 	case "search":
@@ -111,6 +114,8 @@ commands:
   setup            first-run setup: pick games and teams
                      --reset   show the wizard again next time the app opens
                      --done    mark setup complete without the wizard
+  logos            inspect or fill the local team-artwork cache
+                     status | warm | path
   games            list known games, and turn them on or off
                      list | on <slug>... | off <slug>...
   search <query>   fuzzy-search the team index
@@ -622,6 +627,97 @@ func cmdSetup(args []string) error {
 	fmt.Println("The app has a guided version of this: omarchy-esports-app")
 	fmt.Println("Mark this done with: omarchy-esports setup --done")
 	return nil
+}
+
+// cmdLogos reports on, and can force-fill, the artwork cache.
+//
+// Artwork is fetched once and served from disk. When Liquipedia is rate
+// limiting, the cache fills in over subsequent refreshes and the UI shows
+// monograms meanwhile — this command makes that state visible rather than
+// leaving the user wondering why logos are missing.
+func cmdLogos(args []string) error {
+	action := "status"
+	if len(args) > 0 {
+		action = args[0]
+	}
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	cache := liquipedia.NewLogoCache(store.CacheDir())
+
+	switch action {
+	case "path":
+		fmt.Println(filepath.Join(store.CacheDir(), "logos"))
+		return nil
+
+	case "status", "warm":
+		pub, err := st.LoadPublic()
+		if err != nil {
+			return errors.New("no state yet — run `omarchy-esports refresh` first")
+		}
+		// Collapse to canonical files: the same logo appears under several
+		// URLs depending on the size it was drawn at.
+		wanted := map[string]bool{}
+		for _, m := range pub.Matches {
+			for _, o := range m.Opponents {
+				for _, u := range []string{o.Logo.Light, o.Logo.Dark} {
+					if u == "" || strings.HasPrefix(u, "file://") {
+						continue
+					}
+					wanted[liquipedia.CanonicalLogoURL(u)] = true
+				}
+			}
+		}
+		var missing []string
+		for u := range wanted {
+			if !cache.Has(u) {
+				missing = append(missing, u)
+			}
+		}
+		sort.Strings(missing)
+
+		have := len(wanted) - len(missing)
+		fmt.Printf("artwork cache: %d of %d file(s) present\n", have, len(wanted))
+		fmt.Println("  " + filepath.Join(store.CacheDir(), "logos"))
+
+		if action == "status" {
+			if len(missing) > 0 {
+				fmt.Printf("\n%d missing. Fill them now with: omarchy-esports logos warm\n", len(missing))
+			}
+			return nil
+		}
+
+		if len(missing) == 0 {
+			fmt.Println("nothing to fetch")
+			return nil
+		}
+
+		cfg, _ := config.Load()
+		ua := liquipedia.New(version, cfg.ContactEmail, store.CacheDir()).UserAgent()
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+
+		fmt.Printf("fetching %d file(s)…\n", len(missing))
+		done := 0
+		for _, u := range missing {
+			if _, err := cache.Fetch(ctx, u, ua); err != nil {
+				if errors.Is(err, liquipedia.ErrBackoff) {
+					fmt.Printf("\nLiquipedia is rate limiting this address; stopped after %d.\n", done)
+					fmt.Println("The daemon retries automatically, and the UI shows monograms meanwhile.")
+					return nil
+				}
+				fmt.Fprintf(os.Stderr, "  %v\n", err)
+				continue
+			}
+			done++
+		}
+		fmt.Printf("cached %d file(s)\n", done)
+		return nil
+
+	default:
+		return fmt.Errorf("unknown logos action %q (want status, warm or path)", action)
+	}
 }
 
 // cmdGames lists and toggles the games polled.

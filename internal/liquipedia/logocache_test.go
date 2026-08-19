@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 )
 
 // TestLogoCacheStoresAndReuses covers the whole point of the cache: a file is
@@ -82,5 +83,55 @@ func TestLogoCachePathIsStable(t *testing.T) {
 	}
 	if got := c.Path(url); got[len(got)-4:] != ".png" {
 		t.Errorf("extension not preserved: %s", got)
+	}
+}
+
+// TestCanonicalLogoURL collapses per-size thumbnails onto one cache entry.
+func TestCanonicalLogoURL(t *testing.T) {
+	const base = "https://liquipedia.net/commons/images"
+	cases := []struct{ in, want string }{
+		// Different rendered widths of the same logo must collapse.
+		{base + "/thumb/a/a2/Luminosity_Gaming_2018_allmode.png/50px-Luminosity_Gaming_2018_allmode.png",
+			base + "/thumb/a/a2/Luminosity_Gaming_2018_allmode.png/128px-Luminosity_Gaming_2018_allmode.png"},
+		{base + "/thumb/a/a2/Luminosity_Gaming_2018_allmode.png/35px-Luminosity_Gaming_2018_allmode.png",
+			base + "/thumb/a/a2/Luminosity_Gaming_2018_allmode.png/128px-Luminosity_Gaming_2018_allmode.png"},
+		// The original resolves to the same canonical thumbnail.
+		{base + "/a/a2/Luminosity_Gaming_2018_allmode.png",
+			base + "/thumb/a/a2/Luminosity_Gaming_2018_allmode.png/128px-Luminosity_Gaming_2018_allmode.png"},
+		// Anything else is left alone.
+		{"https://example.com/logo.png", "https://example.com/logo.png"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := CanonicalLogoURL(c.in); got != c.want {
+			t.Errorf("CanonicalLogoURL(%q)\n got %s\nwant %s", c.in, got, c.want)
+		}
+	}
+
+	// The whole point: two renderings share one cache entry.
+	c := NewLogoCache(t.TempDir())
+	a := c.Path(CanonicalLogoURL(base + "/thumb/a/a2/X.png/50px-X.png"))
+	b := c.Path(CanonicalLogoURL(base + "/thumb/a/a2/X.png/35px-X.png"))
+	if a != b {
+		t.Errorf("two sizes of one logo mapped to different cache files:\n %s\n %s", a, b)
+	}
+}
+
+// TestBackoffSurvivesRestore covers persistence: a restart must not resume
+// hammering an endpoint that just asked us to stop.
+func TestBackoffSurvivesRestore(t *testing.T) {
+	c := NewLogoCache(t.TempDir())
+	if c.BackingOff() {
+		t.Fatal("a fresh cache should not be backing off")
+	}
+	until := time.Now().Add(20 * time.Minute)
+	c.SetBackoffUntil(until)
+	if !c.BackingOff() {
+		t.Error("restored backoff should be in effect")
+	}
+	// An earlier time must not shorten an active pause.
+	c.SetBackoffUntil(time.Now().Add(time.Minute))
+	if got := c.BackoffUntil(); !got.Equal(until) {
+		t.Errorf("backoff shortened to %s, want %s", got, until)
 	}
 }

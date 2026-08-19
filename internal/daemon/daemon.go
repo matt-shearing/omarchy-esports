@@ -451,6 +451,24 @@ func isMinorEvent(tierType string) bool {
 	return minorEventTypes[strings.ToLower(strings.TrimSpace(tierType))]
 }
 
+// logoPriority ranks a fixture by how soon its artwork will be looked at.
+func logoPriority(m *match.Match, now time.Time) int {
+	p := 0
+	switch m.State {
+	case match.StateLive:
+		p += 100
+	case match.StateUpcoming:
+		p += 50
+		if m.StartsAt.Sub(now) < 24*time.Hour {
+			p += 25
+		}
+	}
+	if m.Followed {
+		p += 40
+	}
+	return p
+}
+
 // maxLogoDownloads bounds artwork downloads per refresh. Logos never change,
 // so this only applies to teams seen for the first time.
 const maxLogoDownloads = 60
@@ -464,6 +482,10 @@ const maxLogoDownloads = 60
 // Caching fixes the rendering, respects their "cache rather than re-request"
 // terms, and makes artwork work offline.
 func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.Private) {
+	// Restore a pause recorded before the last restart.
+	if !priv.LogoBackoffUntil.IsZero() {
+		d.logos.SetBackoffUntil(priv.LogoBackoffUntil)
+	}
 	if d.logos.BackingOff() {
 		return
 	}
@@ -471,6 +493,15 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 	downloads := 0
 
 	localise := func(l *match.Logo) {
+		// Collapse per-size thumbnails onto one canonical file first, so a
+		// team drawn at 35px in one fixture and 50px in another is a single
+		// download rather than two.
+		if l.Light != "" && !strings.HasPrefix(l.Light, "file://") {
+			l.Light = liquipedia.CanonicalLogoURL(l.Light)
+		}
+		if l.Dark != "" && !strings.HasPrefix(l.Dark, "file://") {
+			l.Dark = liquipedia.CanonicalLogoURL(l.Dark)
+		}
 		for _, remote := range []string{l.Light, l.Dark} {
 			if remote == "" || d.logos.Has(remote) {
 				continue
@@ -502,7 +533,19 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 		}
 	}
 
+	// Fetch in the order the user will actually see them. Downloads are
+	// bounded per refresh, so with a cold cache the first sweep should cover
+	// what is on screen — live and imminent fixtures — rather than whatever
+	// happens to sort first, which is the oldest finished match.
+	order := make([]int, len(ms))
 	for i := range ms {
+		order[i] = i
+	}
+	now := time.Now()
+	sort.SliceStable(order, func(a, b int) bool {
+		return logoPriority(&ms[order[a]], now) > logoPriority(&ms[order[b]], now)
+	})
+	for _, i := range order {
 		for j := range ms[i].Opponents {
 			localise(&ms[i].Opponents[j].Logo)
 		}
@@ -520,6 +563,11 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 	}
 	if downloads > 0 {
 		d.logger.Printf("logo cache: downloaded %d file(s)", downloads)
+	}
+	// Persist any pause the sweep just incurred.
+	if until := d.logos.BackoffUntil(); until.After(priv.LogoBackoffUntil) {
+		priv.LogoBackoffUntil = until
+		d.logger.Printf("logo cache: rate limited, pausing until %s", until.Format(time.Kitchen))
 	}
 }
 

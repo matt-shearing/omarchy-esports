@@ -265,6 +265,16 @@ ScrollView {
         }
 
         SettingRow {
+            label: "Team artwork"
+            help: "Logos are downloaded once and served from disk, so they work offline and are never re-requested. If Liquipedia is rate limiting, the cache fills in over later refreshes and teams show a monogram meanwhile."
+            AppButton {
+                text: "Fetch now"
+                subtle: true
+                onClicked: view.apply("__logos", "")
+            }
+        }
+
+        SettingRow {
             label: "Run setup again"
             help: "Reopens the first-run wizard next time the app starts."
             AppButton {

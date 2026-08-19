@@ -68,6 +68,11 @@ type Private struct {
 	// the app's follow-list search without extra API calls. It is kept across
 	// refreshes so it grows into a useful directory over time.
 	Teams map[string]TeamEntry `json:"teams"`
+	// LogoBackoffUntil persists the artwork rate-limit pause across restarts.
+	// Holding it only in memory meant every daemon restart resumed hammering
+	// an endpoint that had just asked us to stop, which is the surest way to
+	// turn a short throttle into a long one.
+	LogoBackoffUntil time.Time `json:"logoBackoffUntil,omitempty"`
 	// DirectorySweeps records when each wiki's team directory was last
 	// enumerated, so a sweep is not repeated on every refresh.
 	DirectorySweeps map[string]time.Time `json:"directorySweeps"`

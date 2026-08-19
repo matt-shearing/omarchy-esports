@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,22 @@ func (c *LogoCache) BackingOff() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return time.Now().Before(c.backoffUntil)
+}
+
+// BackoffUntil returns when downloads may resume, so the caller can persist it.
+func (c *LogoCache) BackoffUntil() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.backoffUntil
+}
+
+// SetBackoffUntil restores a persisted pause.
+func (c *LogoCache) SetBackoffUntil(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if t.After(c.backoffUntil) {
+		c.backoffUntil = t
+	}
 }
 
 // NewLogoCache opens a cache rooted at dir.
@@ -167,3 +184,34 @@ func (c *LogoCache) Fetch(ctx context.Context, url, userAgent string) (string, e
 // UserAgent exposes the client's identifying header, so the logo cache
 // presents the same identity as the API calls.
 func (c *Client) UserAgent() string { return c.ua }
+
+// Canonical thumbnail size. Every logo is cached once at this width and scaled
+// locally, so a team appearing at 35px in one fixture and 50px in another
+// costs one download rather than two.
+//
+// 128px is chosen over the original file because originals are full-resolution
+// artwork — the League of Legends mark is 610KB — while a 128px thumbnail is a
+// few kilobytes and is still sharp at every size this UI draws.
+const CanonicalLogoWidth = 128
+
+var thumbPathRe = regexp.MustCompile(`^(https?://[^/]+/commons/images)/thumb/([0-9a-f])/([0-9a-f]{2})/(.+?)/\d+px-[^/]+$`)
+var originalPathRe = regexp.MustCompile(`^(https?://[^/]+/commons/images)/([0-9a-f])/([0-9a-f]{2})/([^/]+)$`)
+
+// CanonicalLogoURL rewrites any commons image URL — a thumbnail of any width,
+// or the original — to one fixed-width thumbnail.
+//
+// Liquipedia hands out per-size thumbnail URLs, so the same logo appears under
+// several URLs depending on how wide the ticker drew it. Collapsing them means
+// the cache key is the logo, not the rendering.
+func CanonicalLogoURL(url string) string {
+	if m := thumbPathRe.FindStringSubmatch(url); m != nil {
+		return fmt.Sprintf("%s/thumb/%s/%s/%s/%dpx-%s",
+			m[1], m[2], m[3], m[4], CanonicalLogoWidth, m[4])
+	}
+	if m := originalPathRe.FindStringSubmatch(url); m != nil {
+		return fmt.Sprintf("%s/thumb/%s/%s/%s/%dpx-%s",
+			m[1], m[2], m[3], m[4], CanonicalLogoWidth, m[4])
+	}
+	// Not a commons image path; leave it alone.
+	return url
+}

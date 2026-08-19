@@ -131,6 +131,10 @@ ShellRoot {
     }
 
     function applySetting(key, value) {
+        if (key === "__logos") {
+            app.run(["logos", "warm"], "fetching artwork…")
+            return
+        }
         if (key === "__edit") {
             // No terminal is guaranteed, so open the file with the desktop
             // handler rather than assuming $EDITOR.
