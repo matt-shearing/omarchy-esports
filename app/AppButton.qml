@@ -11,8 +11,11 @@ Rectangle {
 
     signal clicked
 
-    implicitWidth: label.implicitWidth + 22
-    implicitHeight: 26
+    // Secondary actions are physically smaller, not merely dimmer. A row can
+    // carry four of these, and at equal size the incidental ones ("Liquipedia",
+    // "Reveal") carried the same visual weight as the thing the row is for.
+    implicitWidth: label.implicitWidth + (button.subtle ? 16 : 22)
+    implicitHeight: button.subtle ? 22 : 26
     radius: Theme.radius - 2
 
     color: {
@@ -34,6 +37,6 @@ Rectangle {
         text: button.text
         color: button.subtle ? Theme.muted : Theme.foreground
         font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontCaption
+        font.pixelSize: button.subtle ? Theme.fontCaption - 1 : Theme.fontCaption
     }
 }

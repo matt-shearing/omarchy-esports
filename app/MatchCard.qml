@@ -30,6 +30,9 @@ Rectangle {
     readonly property bool masked: match ? Model.isMasked(match) : false
     readonly property bool watched: match ? match.watched === true : false
     readonly property bool queueHead: match ? match.queueHead === true : false
+    // Below this the fixed columns cannot all fit, and something has to give
+    // before content starts escaping the card.
+    readonly property bool compact: card.width > 0 && card.width < 900
 
     implicitHeight: layout.implicitHeight + Theme.gap * 2
     radius: Theme.radius
@@ -126,6 +129,11 @@ Rectangle {
         }
 
         // Teams
+        //
+        // Both sides take an equal share rather than sizing to their names, so
+        // "vs" lands on the same x in every row. Sizing to content let the
+        // divider wander by a couple of hundred pixels down a list, which is
+        // what stopped the column reading as a column at all.
         RowLayout {
             Layout.fillWidth: true
             Layout.minimumWidth: 220
@@ -133,6 +141,7 @@ Rectangle {
 
             AppTeamBadge {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 0
                 opponent: card.match ? card.match.opponents[0] : null
                 followed: Model.isFollowedTeam(card.match ? card.match.opponents[0] : null, card.teams, card.match ? card.match.wiki : "")
                 onClicked: function (name) { card.inspectTeam(name) }
@@ -144,11 +153,14 @@ Rectangle {
                 font.family: Theme.fontFamily
                 font.pixelSize: Model.scoreLabel(card.match) !== "" ? Theme.fontSubtitle : Theme.fontCaption
                 font.bold: Model.scoreLabel(card.match) !== ""
+                horizontalAlignment: Text.AlignHCenter
+                Layout.preferredWidth: 44
                 Layout.alignment: Qt.AlignVCenter
             }
 
             AppTeamBadge {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 0
                 opponent: card.match ? card.match.opponents[1] : null
                 followed: Model.isFollowedTeam(card.match ? card.match.opponents[1] : null, card.teams, card.match ? card.match.wiki : "")
                 mirrored: true
@@ -157,10 +169,16 @@ Rectangle {
         }
 
         // Tournament
+        //
+        // One fixed width for every row: a column that sized between 130 and
+        // 240 put each row's event name in a different place. It is dropped
+        // rather than squeezed when the window is too narrow to hold it, since
+        // a half-elided event name is worth less than the space it costs.
         ColumnLayout {
-            Layout.preferredWidth: 190
-            Layout.minimumWidth: 130
-            Layout.maximumWidth: 240
+            visible: !card.compact
+            Layout.preferredWidth: 196
+            Layout.minimumWidth: 196
+            Layout.maximumWidth: 196
             Layout.alignment: Qt.AlignVCenter
             spacing: 2
 
@@ -204,11 +222,20 @@ Rectangle {
             }
         }
 
-        // Action
+        // Actions
+        //
+        // A fixed box with the buttons pushed to its right edge. How many
+        // appear varies by row — a followed finished match adds "Watched", a
+        // masked one adds "Reveal" — so a cluster that sized to its contents
+        // started somewhere different on every row, which read as the whole
+        // list being ragged.
         RowLayout {
-            Layout.minimumWidth: 96
+            Layout.preferredWidth: 306
+            Layout.minimumWidth: 306
             Layout.alignment: Qt.AlignVCenter
             spacing: 6
+
+            Item { Layout.fillWidth: true }
 
             AppButton {
                 visible: card.live || (!card.finished && card.match && Model.preferredStream(card.match) !== null) || card.hasVod
