@@ -59,6 +59,7 @@ Rectangle {
 
         // Time column
         ColumnLayout {
+            Layout.fillWidth: false
             Layout.preferredWidth: 74
             Layout.alignment: Qt.AlignVCenter
             spacing: 2
@@ -89,7 +90,10 @@ Rectangle {
         // Game badge: small and dim, a visual key rather than a label to read.
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: badgeRow.implicitWidth + 12
+            // Fixed, because this sits before every other column: letting it
+            // size to "DOTA2" vs "CS2" shifted the logos, the names and the
+            // "vs" divider by 12px on alternating rows.
+            Layout.preferredWidth: 62
             Layout.preferredHeight: 18
             radius: 4
             visible: badgeText.text !== ""
@@ -100,12 +104,13 @@ Rectangle {
                 anchors.centerIn: parent
                 spacing: 4
 
-                // Artwork sits beside the short badge rather than replacing
-                // it: at this size a logo alone is decoration, but paired with
-                // the text it is a much faster thing to scan a list for.
+                // No artwork at this size. Several publisher marks are white
+                // on transparent, and at 13px on a light theme they read as
+                // Qt's broken-image glyph rather than as a logo. The chips in
+                // settings render the same artwork at 40px where it works.
                 Image {
-                    source: Model.gameIconFor(card.games, card.match ? card.match.wiki : "")
-                    visible: status === Image.Ready
+                    source: ""
+                    visible: false
                     Layout.preferredWidth: 13
                     Layout.preferredHeight: 13
                     fillMode: Image.PreserveAspectFit
@@ -176,9 +181,12 @@ Rectangle {
         // a half-elided event name is worth less than the space it costs.
         ColumnLayout {
             visible: !card.compact
-            Layout.preferredWidth: 196
-            Layout.minimumWidth: 196
-            Layout.maximumWidth: 196
+            // Exactly one column in this row may be flexible, and it has to be
+            // the teams — they carry the content the row exists for. Every
+            // other column being fillWidth by default is what starved them.
+            Layout.fillWidth: false
+            Layout.preferredWidth: 240
+            Layout.maximumWidth: 240
             Layout.alignment: Qt.AlignVCenter
             spacing: 2
 
@@ -230,31 +238,33 @@ Rectangle {
         // started somewhere different on every row, which read as the whole
         // list being ragged.
         RowLayout {
-            Layout.preferredWidth: 306
-            Layout.minimumWidth: 306
+            // fillWidth defaults to TRUE for a Layout item, only false for a
+            // plain one. Without pinning it off, this box ignored its declared
+            // width and swallowed every row's surplus — several hundred pixels
+            // of void sitting next to elided team names.
+            Layout.fillWidth: false
+            Layout.preferredWidth: 232
+            Layout.maximumWidth: 232
             Layout.alignment: Qt.AlignVCenter
             spacing: 6
 
             Item { Layout.fillWidth: true }
 
             AppButton {
-                visible: card.live || (!card.finished && card.match && Model.preferredStream(card.match) !== null) || card.hasVod
-                text: card.hasVod ? (card.highlightsOnly ? "Highlights" : "Watch VOD") : "Watch"
-                accentuated: card.live || card.queueHead
-                onClicked: card.watch()
-            }
-
-            AppButton {
                 visible: !!(card.finished && card.match && card.match.followed && !card.watched)
-                text: "Watched"
+                text: "\u2713"
+                iconOnly: true
                 subtle: true
+                tooltip: "Mark as watched"
                 onClicked: card.markWatched()
             }
 
             AppButton {
                 visible: Model.tournamentUrl(card.match) !== ""
-                text: "Liquipedia"
+                text: "\u2197"
+                iconOnly: true
                 subtle: true
+                tooltip: "Open on Liquipedia"
                 onClicked: Qt.openUrlExternally(Model.tournamentUrl(card.match))
             }
 
@@ -265,6 +275,25 @@ Rectangle {
                 text: "Reveal"
                 subtle: true
                 onClicked: card.reveal()
+            }
+
+            // The primary action last and in a fixed slot, so it lands on the
+            // same x in every row. Right-aligning a cluster whose button count
+            // varies by row moved it by over a hundred pixels between
+            // neighbours, and the eye had to hunt for it each time.
+            Item {
+                Layout.preferredWidth: 100
+                Layout.preferredHeight: 26
+                Layout.alignment: Qt.AlignVCenter
+
+                AppButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: card.live || (!card.finished && card.match && Model.preferredStream(card.match) !== null) || card.hasVod
+                    text: card.hasVod ? (card.highlightsOnly ? "Highlights" : "Watch VOD") : "Watch"
+                    accentuated: card.live || card.queueHead
+                    onClicked: card.watch()
+                }
             }
         }
     }

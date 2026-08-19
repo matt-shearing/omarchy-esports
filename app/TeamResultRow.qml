@@ -97,10 +97,15 @@ Rectangle {
             }
         }
 
+        // One size for both states. Driving `subtle` off followed swapped the
+        // control's height and width together, so the right-hand column
+        // alternated between two pill sizes down the list. State is carried by
+        // fill alone now, and the unfollowed state is quiet: finding a team is
+        // this page's job, following one is incidental to it.
         AppButton {
+            Layout.preferredWidth: 96
             text: row.followed ? "Following" : "Follow"
-            accentuated: !row.followed
-            subtle: row.followed
+            accentuated: row.followed
             onClicked: row.toggleFollow()
         }
     }

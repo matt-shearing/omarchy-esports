@@ -61,9 +61,13 @@ Rectangle {
             color: Theme.muted
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption
-            Layout.fillWidth: true
+            Layout.maximumWidth: 260
             elide: Text.ElideRight
         }
+
+        // One gap, so the row reads as a name on the left and a metadata group
+        // on the right rather than two clusters marooned either side of a void.
+        Item { Layout.fillWidth: true }
 
         Text {
             text: row.player && row.player.country ? String(row.player.country) : ""

@@ -187,9 +187,11 @@ Rectangle {
                     // The artwork carries the same 0.4 opacity as the text it
                     // sits beside: this line is orientation, and must not
                     // out-shout the fixture above it.
+                    // Suppressed for the same reason as the app's match badge:
+                    // a white-on-transparent mark is unreadable at this size.
                     Image {
-                        source: Model.gameIconForMatch(row.games, row.match)
-                        visible: status === Image.Ready
+                        source: ""
+                        visible: false
                         Layout.preferredWidth: Style.font.caption
                         Layout.preferredHeight: Style.font.caption
                         fillMode: Image.PreserveAspectFit

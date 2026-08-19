@@ -751,7 +751,10 @@ ShellRoot {
                             model: app.teamProfile ? app.teamProfile.fields : []
                             delegate: Text {
                                 required property var modelData
-                                text: modelData.label + ": " + modelData.value
+                                // The separator matches the stat line below.
+                                // Without it the fields read as one run of
+                                // muted text with no boundaries.
+                                text: modelData.label + " " + modelData.value + "  ·"
                                 color: Theme.muted
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontCaption
