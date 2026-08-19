@@ -406,6 +406,24 @@ function vodSections(matches, opts) {
   return { queue: queue, rest: rest }
 }
 
+// vodTabFor decides which of the two VOD tabs to show.
+//
+// The two lists answer different questions and are ordered in opposite
+// directions — the catch-up queue runs oldest first because watching out of
+// order is what spoils a bracket, while the archive runs newest first. Stacking
+// them put the newest recordings below the entire backlog, which is the wrong
+// way round for the commoner question of "what just got uploaded".
+//
+// An explicit choice is always honoured, including onto an empty list, because
+// silently bouncing someone off the tab they just clicked is worse than an
+// empty state that explains itself. Only the unset case picks a side, and it
+// prefers the queue: a backlog is time-sensitive in a way the archive is not.
+function vodTabFor(sections, preferred) {
+  if (preferred === "catchup" || preferred === "recent") return preferred
+  var queue = (sections && sections.queue) || []
+  return queue.length > 0 ? "catchup" : "recent"
+}
+
 // tournamentsWithVods lists the tournaments that have recordings, so the VODs
 // view can offer them as a filter.
 function tournamentsWithVods(matches) {

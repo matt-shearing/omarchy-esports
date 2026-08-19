@@ -195,7 +195,7 @@ Rectangle {
             }
 
             AppButton {
-                visible: card.finished && card.match && card.match.followed && !card.watched
+                visible: !!(card.finished && card.match && card.match.followed && !card.watched)
                 text: "Watched"
                 subtle: true
                 onClicked: card.markWatched()

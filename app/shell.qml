@@ -28,6 +28,9 @@ ShellRoot {
     // VODs view filters.
     property bool vodFollowedOnly: false
     property string vodTournament: ""
+    // Which VOD list is showing. Empty means the user has not chosen, in which
+    // case vodTabFor picks; a click pins it.
+    property string vodTab: ""
     property var config: Model.parseConfig("")
     // Shown until first-run setup is done. Held locally as well so finishing
     // the wizard takes effect immediately rather than waiting for the config
@@ -215,6 +218,7 @@ ShellRoot {
         tournament: vodTournament
     })
     readonly property var vodTournaments: Model.tournamentsWithVods(model.matches)
+    readonly property string vodTabActive: Model.vodTabFor(app.vods, app.vodTab)
     readonly property var searchResults: Model.searchTeams(teamIndex, teamQuery,
         { minChars: 2, limit: 20, wiki: gameFilter })
     readonly property var indexGames: Model.filterGames(config, teamIndex)
@@ -396,6 +400,40 @@ ShellRoot {
                 ColumnLayout {
                     spacing: 10
 
+                    // The two lists are ordered in opposite directions and
+                    // answer different questions, so they get a switch rather
+                    // than one scroll: the archive below a long backlog is the
+                    // wrong way round for "what just got uploaded".
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        AppButton {
+                            text: "Catch up" + (app.vods.queue.length > 0
+                                ? "  " + app.vods.queue.length : "")
+                            accentuated: app.vodTabActive === "catchup"
+                            onClicked: app.vodTab = "catchup"
+                        }
+
+                        AppButton {
+                            text: "Recent recordings" + (app.vods.rest.length > 0
+                                ? "  " + app.vods.rest.length : "")
+                            accentuated: app.vodTabActive === "recent"
+                            onClicked: app.vodTab = "recent"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: app.vodTabActive === "catchup"
+                                ? "Oldest first — watching one unlocks the next"
+                                : "Newest first"
+                            color: Theme.muted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                        }
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 6
@@ -447,10 +485,18 @@ ShellRoot {
                         anchors.centerIn: parent
                         visible: vodList.count === 0
                         text: {
+                            var other = app.vodTabActive === "catchup"
+                                ? app.vods.rest.length : app.vods.queue.length
+                            var elsewhere = other > 0
+                                ? "\n\n" + other + " in " + (app.vodTabActive === "catchup"
+                                    ? "Recent recordings" : "Catch up") + "."
+                                : ""
+                            if (app.vodTabActive === "catchup")
+                                return "Nothing to catch up on." + elsewhere
                             if (app.vodTournament !== "")
-                                return "No recordings for " + app.vodTournament + "."
+                                return "No recordings for " + app.vodTournament + "." + elsewhere
                             if (app.vodFollowedOnly)
-                                return "No recordings for your teams yet.\n\nTurn off \"My teams\" to see everything."
+                                return "No recordings for your teams yet.\n\nTurn off \"My teams\" to see everything." + elsewhere
                             return "No recordings yet.\n\nVODs appear once a match finishes and the\nbroadcaster uploads it."
                         }
                         color: Theme.muted
@@ -467,70 +513,26 @@ ShellRoot {
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-                        // A flat model of section headers and cards, so the
-                        // queue and the archive scroll as one list.
-                        model: {
-                            var rows = []
-                            if (app.vods.queue.length > 0) {
-                                rows.push({ kind: "header", text: "CATCH UP",
-                                    hint: "Oldest first. Watching one unlocks the next." })
-                                for (var i = 0; i < app.vods.queue.length; i++)
-                                    rows.push({ kind: "match", match: app.vods.queue[i] })
-                            }
-                            if (app.vods.rest.length > 0) {
-                                rows.push({ kind: "header", text: "RECENT RECORDINGS", hint: "" })
-                                for (var j = 0; j < app.vods.rest.length; j++)
-                                    rows.push({ kind: "match", match: app.vods.rest[j] })
-                            }
-                            return rows
-                        }
+                        // Only the selected list. The tab is the heading, so
+                        // in-list section headers would just repeat it.
+                        model: app.vodTabActive === "catchup"
+                            ? app.vods.queue : app.vods.rest
 
-                        delegate: Loader {
+                        delegate: MatchCard {
                             required property var modelData
                             width: vodList.width
-                            sourceComponent: modelData.kind === "header" ? headerComponent : cardComponent
-
-                            Component {
-                                id: headerComponent
-                                ColumnLayout {
-                                    spacing: 2
-                                    Text {
-                                        text: modelData.text
-                                        color: Theme.foreground
-                                        opacity: 0.5
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontCaption
-                                        font.bold: true
-                                        font.letterSpacing: 1
-                                        Layout.topMargin: 10
-                                    }
-                                    Text {
-                                        visible: modelData.hint !== ""
-                                        text: modelData.hint
-                                        color: Theme.muted
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontCaption
-                                    }
-                                }
+                            match: modelData
+                            teams: app.model.teams
+                            nowMs: app.nowMs
+                            tournamentClickable: true
+                            onWatch: app.watch(modelData)
+                            onReveal: app.run(["reveal", modelData.id], "revealing…")
+                            onMarkWatched: app.run(["watched", modelData.id], "updating…")
+                            onInspectTeam: function (name) {
+                                app.selectedTeam = name
+                                app.selectedTeamWiki = modelData.wiki || ""
                             }
-
-                            Component {
-                                id: cardComponent
-                                MatchCard {
-                                    match: modelData.match
-                                    teams: app.model.teams
-                                    nowMs: app.nowMs
-                                    tournamentClickable: true
-                                    onWatch: app.watch(modelData.match)
-                                    onReveal: app.run(["reveal", modelData.match.id], "revealing…")
-                                    onMarkWatched: app.run(["watched", modelData.match.id], "updating…")
-                                    onInspectTeam: function (name) {
-                                        app.selectedTeam = name
-                                        app.selectedTeamWiki = modelData.match.wiki || ""
-                                    }
-                                    onInspectTournament: function (name) { app.vodTournament = name }
-                                }
-                            }
+                            onInspectTournament: function (name) { app.vodTournament = name }
                         }
                     }
                     }

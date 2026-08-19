@@ -131,6 +131,21 @@ check("vodSections filters by followed team and tournament", () => {
   eq(Model.vodSections(matches, { tournament: "EWC" }).queue.length, 1);
 });
 
+check("vodTabFor defaults to the backlog when there is one", () => {
+  eq(Model.vodTabFor({ queue: [1], rest: [2, 3] }, ""), "catchup");
+  eq(Model.vodTabFor({ queue: [], rest: [2, 3] }, ""), "recent");
+  // Nothing anywhere still has to name a tab to render.
+  eq(Model.vodTabFor({ queue: [], rest: [] }, ""), "recent");
+  eq(Model.vodTabFor(undefined, ""), "recent");
+});
+
+check("vodTabFor honours an explicit choice onto an empty list", () => {
+  // Bouncing someone off the tab they just clicked is worse than an empty
+  // state that explains itself and points at the other tab.
+  eq(Model.vodTabFor({ queue: [], rest: [1] }, "catchup"), "catchup");
+  eq(Model.vodTabFor({ queue: [1], rest: [] }, "recent"), "recent");
+});
+
 // --- monograms -----------------------------------------------------------
 check("initialsFor prefers the team's own tag", () => {
   // The ticker abbreviation wins when we have it.

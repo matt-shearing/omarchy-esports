@@ -271,7 +271,7 @@ Rectangle {
                 }
 
                 Button {
-                    visible: row.finished && row.match && row.match.followed && !row.match.watched
+                    visible: !!(row.finished && row.match && row.match.followed && !row.match.watched)
                     text: "Mark watched"
                     fontSize: Style.font.caption
                     foreground: row.fg
@@ -295,7 +295,7 @@ Rectangle {
                 }
 
                 Button {
-                    visible: row.match && Model.opponentUrl(row.match.opponents[0]) !== ""
+                    visible: !!row.match && Model.opponentUrl(row.match.opponents[0]) !== ""
                     text: Model.opponentName(row.match ? row.match.opponents[0] : null)
                     fontSize: Style.font.caption
                     foreground: row.fg
@@ -307,7 +307,7 @@ Rectangle {
                 }
 
                 Button {
-                    visible: row.match && Model.opponentUrl(row.match.opponents[1]) !== ""
+                    visible: !!row.match && Model.opponentUrl(row.match.opponents[1]) !== ""
                     text: Model.opponentName(row.match ? row.match.opponents[1] : null)
                     fontSize: Style.font.caption
                     foreground: row.fg
