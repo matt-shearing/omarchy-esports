@@ -24,6 +24,7 @@ import (
 	"github.com/contra/omarchy-esports/internal/daemon"
 	"github.com/contra/omarchy-esports/internal/fuzzy"
 	"github.com/contra/omarchy-esports/internal/liquipedia"
+	"github.com/contra/omarchy-esports/internal/logosource"
 	"github.com/contra/omarchy-esports/internal/match"
 	"github.com/contra/omarchy-esports/internal/notify"
 	"github.com/contra/omarchy-esports/internal/store"
@@ -697,8 +698,19 @@ func cmdLogos(args []string) error {
 		// Collapse to canonical files: the same logo appears under several
 		// URLs depending on the size it was drawn at.
 		wanted := map[string]bool{}
+		curated := 0
 		for _, m := range pub.Matches {
 			for _, o := range m.Opponents {
+				// A curated source on the org's own CDN replaces both
+				// Liquipedia variants, and keeps working when Liquipedia has
+				// rate-limited this address.
+				if u := logosource.URLFor(o.Name); u != "" {
+					if !wanted[u] {
+						curated++
+					}
+					wanted[u] = true
+					continue
+				}
 				for _, u := range []string{o.Logo.Light, o.Logo.Dark} {
 					if u == "" || strings.HasPrefix(u, "file://") {
 						continue
@@ -716,7 +728,11 @@ func cmdLogos(args []string) error {
 		sort.Strings(missing)
 
 		have := len(wanted) - len(missing)
-		fmt.Printf("artwork cache: %d of %d file(s) present\n", have, len(wanted))
+		fmt.Printf("artwork cache: %d of %d file(s) present", have, len(wanted))
+		if curated > 0 {
+			fmt.Printf("  (%d from curated sources)", curated)
+		}
+		fmt.Println()
 		fmt.Println("  " + filepath.Join(store.CacheDir(), "logos"))
 		if seed := cache.SeedPath(); seed != "" {
 			if entries, err := os.ReadDir(seed); err == nil && len(entries) > 0 {
@@ -742,13 +758,15 @@ func cmdLogos(args []string) error {
 		defer cancel()
 
 		fmt.Printf("fetching %d file(s)…\n", len(missing))
-		done := 0
+		done, limited := 0, 0
 		for _, u := range missing {
 			if _, err := cache.Fetch(ctx, u, ua); err != nil {
 				if errors.Is(err, liquipedia.ErrBackoff) {
-					fmt.Printf("\nLiquipedia is rate limiting this address; stopped after %d.\n", done)
-					fmt.Println("The daemon retries automatically, and the UI shows monograms meanwhile.")
-					return nil
+					// Rate limiting is tracked per host, so a refusal from one
+					// source says nothing about the others — skip this file
+					// and keep going rather than abandoning the whole sweep.
+					limited++
+					continue
 				}
 				fmt.Fprintf(os.Stderr, "  %v\n", err)
 				continue
@@ -756,6 +774,10 @@ func cmdLogos(args []string) error {
 			done++
 		}
 		fmt.Printf("cached %d file(s)\n", done)
+		if limited > 0 {
+			fmt.Printf("%d skipped: that host is rate limiting this address. The daemon\n", limited)
+			fmt.Println("retries automatically, and teams show a monogram meanwhile.")
+		}
 		return nil
 
 	default:

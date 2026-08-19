@@ -1,0 +1,250 @@
+{
+  "_comment": [
+    "Curated logo sources, keyed by the team name Liquipedia uses.",
+    "",
+    "This file contains URLs, not artwork. It ships with the project; the images",
+    "it points at do not, and are fetched to each user's own machine and cached",
+    "there. Preferring an org's own CDN over Liquipedia also spreads the load",
+    "across many hosts rather than concentrating it on one, which is what got",
+    "this project rate-limited in the first place.",
+    "",
+    "'terms' records what the source actually states. 'none stated' is the honest",
+    "and dominant answer: almost no esports org publishes a press kit with reuse",
+    "terms, so most entries are simply the file the org's own site loads. Where a",
+    "real licence exists it is recorded, along with any attribution it requires.",
+    "",
+    "Verified: every url returned HTTP 200 with an image content-type when added.",
+    "source values: official (org's own site), presskit, commons (usually PD-textlogo), wikipedia-nonfree (fair use scoped to Wikipedia — legally no broader than Liquipedia's own copy), other."
+  ],
+  "version": 1,
+  "teams": {
+    "Shopify Rebellion": {
+      "url": "https://shopifyrebellion.gg/cdn/shop/files/R_Mark_BLK.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "TEAM VISION": {
+      "url": "https://parivision.gg/upload/iblock/f02/n2utp7h920f2rt9720unmzj3sr7fe7rm.svg",
+      "source": "official",
+      "terms": "none stated",
+      "note": "Liquipedia's 'TEAM VISION' is the org PARIVISION"
+    },
+    "Team Falcons": {
+      "url": "https://falcons.com/cdn/shop/files/Icon-Blue.png?v=1785072617",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Team Liquid": {
+      "url": "https://cdn.prod.website-files.com/64bf6e8cda9043babe7ca006/65f44cd149e66e386d8d3da7_Crest-on-light.svg",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Team Spirit": {
+      "url": "https://teamspirit.gg/assets/logo-a2f0a3a5.svg",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Team Vitality": {
+      "url": "https://vitality.gg/cdn/shop/files/Vitality-logo-black-rgb.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Team Yandex": {
+      "url": "https://tds-cdn.ewc.efg.gg/assets/clubs/2068035498164621312/LOGO_DARK.png",
+      "source": "other",
+      "terms": "none stated",
+      "note": "Esports World Cup participant-club feed"
+    },
+    "The MongolZ": {
+      "url": "https://static.hltv.org/images/team/logo/6248",
+      "source": "other",
+      "terms": "none stated",
+      "note": "no official site exists; HLTV asset"
+    },
+    "Tundra Esports": {
+      "url": "https://static.wixstatic.com/media/3971d9_eb2f39ce3c5c4c2b9678cbfbf7c96a51~mv2.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Virtus.pro": {
+      "url": "https://virtus.pro/img/logo.svg",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Xtreme Gaming": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/f2/Xtreme_Gaming_LOGO.png",
+      "source": "commons",
+      "terms": "CC BY-SA 4.0",
+      "attribution": "Wikimedia Commons contributors, CC BY-SA 4.0",
+      "note": "community upload, not org-issued"
+    },
+    "paiN Gaming": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/e/e5/PaiN_Gaming_logo.svg",
+      "source": "commons",
+      "terms": "PD-textlogo, trademark applies"
+    },
+    "PaiN Gaming": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/e/e5/PaiN_Gaming_logo.svg",
+      "source": "commons",
+      "terms": "PD-textlogo, trademark applies"
+    },
+    "Sangal Esports": {
+      "url": "https://sangal.gg/wp-content/uploads/2023/11/logo_white.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "100 Thieves": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/1/16/100_Thieves_logo.svg",
+      "source": "commons",
+      "terms": "PD-textlogo, trademark applies"
+    },
+    "3DMAX": {
+      "url": "https://3dmax.gg/wp-content/uploads/2024/10/LOGO_FINAL_3DMAX-new.svg",
+      "source": "presskit",
+      "terms": "none stated; media kit asks that the visual identity be respected"
+    },
+    "9z Team": {
+      "url": "https://9z.gg/assets/header/logo.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Alliance": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/ce/Alliance_esports_logo.png",
+      "source": "commons",
+      "terms": "PD-textlogo, trademark applies"
+    },
+    "Astralis": {
+      "url": "https://cdn.prod.website-files.com/699f55e7b4d362b6ce396f5d/69ada3d9f96c3dd1c5b47e61_Mid_Red_Emblem_With_Stars%202.svg",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Aurora Gaming": {
+      "url": "https://upload.wikimedia.org/wikipedia/en/5/5a/Aurora_Gaming_logo.svg",
+      "source": "wikipedia-nonfree",
+      "terms": "non-free, fair use scoped to Wikipedia"
+    },
+    "B8": {
+      "url": "https://cdn.prod.website-files.com/64a689c46a633fc8114d5cf5/64e051a36321200c4c0bac78_B8_logo%20(1).svg",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "BIG": {
+      "url": "https://bigclan.gg/cdn/shop/files/big-logo.svg?v=1767095382&width=600",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "BetBoom Team": {
+      "url": "https://static.tildacdn.net/tild3331-3735-4137-b262-373237656662/Frame_2091750347.svg",
+      "source": "official",
+      "terms": "none stated",
+      "note": "small monogram mark"
+    },
+    "ENCE Prospects": {
+      "url": "https://ence.gg/cdn/shop/files/ence-logo-wide-white.png?v=1744704570&width=600",
+      "source": "official",
+      "terms": "none stated",
+      "note": "ENCE main mark; no distinct Prospects logo exists"
+    },
+    "FURIA": {
+      "url": "https://upload.wikimedia.org/wikipedia/en/a/ad/FURIA_Esports_logo.svg",
+      "source": "wikipedia-nonfree",
+      "terms": "non-free, fair use scoped to Wikipedia"
+    },
+    "FUT Esports": {
+      "url": "https://futesports.gg/images/logo/FUT.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "FaZe Clan": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/4d/Faze_Clan.svg",
+      "source": "commons",
+      "terms": "public domain per Commons; trademark applies"
+    },
+    "G2 Esports": {
+      "url": "https://upload.wikimedia.org/wikipedia/en/1/12/Esports_organization_G2_Esports_logo.svg",
+      "source": "wikipedia-nonfree",
+      "terms": "non-free, fair use scoped to Wikipedia"
+    },
+    "GamerLegion": {
+      "url": "https://upload.wikimedia.org/wikipedia/en/d/d5/GamerLegion_logo.png",
+      "source": "wikipedia-nonfree",
+      "terms": "non-free, fair use scoped to Wikipedia"
+    },
+    "Heroic": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Heroic_2023_logo.png",
+      "source": "commons",
+      "terms": "PD per Commons uploader tag; trademark applies"
+    },
+    "JiJieHao": {
+      "url": "https://owcdn.net/img/642afe112f136.png",
+      "source": "other",
+      "terms": "none stated",
+      "note": "VLR.gg profile asset"
+    },
+    "K27": {
+      "url": "https://storage.ensigame.com/logos/teams/67b071dd7b0278ec03218ac4ae231555.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "LGD Gaming": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/9/95/LGD_Gaming.png",
+      "source": "commons",
+      "terms": "PD per Commons uploader tag; trademark applies"
+    },
+    "Legacy": {
+      "url": "https://owcdn.net/img/6512452f60eb7.png",
+      "source": "other",
+      "terms": "none stated",
+      "note": "VLR.gg profile asset"
+    },
+    "M80": {
+      "url": "https://cdn.m80.gg/images/icons/og/favicon.svg",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "MIBR": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/53/Made_In_Brazil_logo.png",
+      "source": "commons",
+      "terms": "PD per Commons uploader tag; trademark applies"
+    },
+    "MOUZ": {
+      "url": "https://mousesports.com/wp-content/uploads/2021/10/logo-favicon.svg",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Natus Vincere": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/52/NAVI-Logo.svg",
+      "source": "commons",
+      "terms": "PD per Commons uploader tag; trademark applies",
+      "note": "org also publishes a press kit at navi.gg/en/company/presskit"
+    },
+    "Nigma Galaxy": {
+      "url": "https://nigmagalaxy.com/wp-content/uploads/2025/03/Logo_mark.png",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "Ninjas in Pyjamas": {
+      "url": "https://cdn.shopify.com/s/files/1/1516/5886/files/NIP-Symbol-RGB-Black_65f83867-93c0-488d-bbaf-aea6c127af0e_400x.png",
+      "source": "official",
+      "terms": "none stated",
+      "note": "from the org's own brand page"
+    },
+    "Passion UA": {
+      "url": "https://res2.weblium.site/res/65b11179bf664d000f76362f/6864fb707811194f89744c57",
+      "source": "official",
+      "terms": "none stated"
+    },
+    "SAW": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/6/68/SAW_2021.png",
+      "source": "commons",
+      "terms": "CC BY-SA 4.0",
+      "attribution": "Wikimedia Commons contributors, CC BY-SA 4.0"
+    },
+    "Sharper Esports": {
+      "url": "https://owcdn.net/img/698dc40a29cda.png",
+      "source": "other",
+      "terms": "none stated",
+      "note": "VLR.gg profile asset"
+    }
+  }
+}

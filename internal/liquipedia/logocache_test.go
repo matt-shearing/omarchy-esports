@@ -154,3 +154,17 @@ func TestClientRateLimitBackoff(t *testing.T) {
 		t.Errorf("pause shortened to %s, want %s", got, until)
 	}
 }
+
+// TestOriginalOf supports the 404 fallback: MediaWiki refuses to upscale, so a
+// 128px request for a narrower original must retry the original file.
+func TestOriginalOf(t *testing.T) {
+	const base = "https://liquipedia.net/commons/images"
+	got := originalOf(base + "/thumb/a/a2/Team_X.png/128px-Team_X.png")
+	want := base + "/a/a2/Team_X.png"
+	if got != want {
+		t.Errorf("originalOf\n got %s\nwant %s", got, want)
+	}
+	if originalOf("https://example.com/logo.png") != "" {
+		t.Error("a non-thumbnail URL has no original to fall back to")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,44 +41,83 @@ type LogoCache struct {
 	mu sync.Mutex
 	// pace serialises downloads so a first run does not burst.
 	last time.Time
-	// backoffUntil pauses all downloads after a 429. Artwork is decoration;
-	// continuing to ask for it while being told to stop is both rude and
-	// pointless, and the cache simply fills in on a later refresh.
-	backoffUntil time.Time
+	// backoffUntil pauses downloads PER HOST after a 429. Artwork is
+	// decoration; continuing to ask while being told to stop is both rude and
+	// pointless, and the cache fills in on a later refresh.
+	//
+	// Per host, not global: a 429 from liquipedia.net says nothing about an
+	// org's own CDN, and a single global pause meant one refusal blocked every
+	// other source too.
+	backoffUntil map[string]time.Time
+}
+
+// hostOf extracts the host for backoff bookkeeping.
+func hostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
 }
 
 // ErrBackoff reports that downloads are paused after a rate-limit response.
 var ErrBackoff = errors.New("logo downloads paused after a 429")
 
-// BackingOff reports whether downloads are currently paused.
+// BackingOff reports whether every known host is currently paused. It is a
+// coarse check used to skip an artwork sweep entirely.
 func (c *LogoCache) BackingOff() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return time.Now().Before(c.backoffUntil)
+	if len(c.backoffUntil) == 0 {
+		return false
+	}
+	now := time.Now()
+	for _, t := range c.backoffUntil {
+		if now.After(t) {
+			return false
+		}
+	}
+	return true
 }
 
-// BackoffUntil returns when downloads may resume, so the caller can persist it.
+// BackingOffHost reports whether one host is paused.
+func (c *LogoCache) BackingOffHost(rawURL string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Before(c.backoffUntil[hostOf(rawURL)])
+}
+
+// BackoffUntil returns the furthest pause across hosts, for persistence.
 func (c *LogoCache) BackoffUntil() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.backoffUntil
+	var latest time.Time
+	for _, t := range c.backoffUntil {
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	return latest
 }
 
-// SetBackoffUntil restores a persisted pause.
+// SetBackoffUntil restores a persisted pause for Liquipedia, which is the only
+// host whose pause is worth carrying across restarts.
 func (c *LogoCache) SetBackoffUntil(t time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if t.After(c.backoffUntil) {
-		c.backoffUntil = t
+	const h = "liquipedia.net"
+	if t.After(c.backoffUntil[h]) {
+		c.backoffUntil[h] = t
 	}
 }
 
 // NewLogoCache opens a cache rooted at dir.
 func NewLogoCache(dir string) *LogoCache {
 	return &LogoCache{
-		dir:  filepath.Join(dir, "logos"),
-		seed: seedDir(),
-		http: &http.Client{Timeout: 30 * time.Second},
+		dir:          filepath.Join(dir, "logos"),
+		seed:         seedDir(),
+		http:         &http.Client{Timeout: 30 * time.Second},
+		backoffUntil: map[string]time.Time{},
 	}
 }
 
@@ -104,15 +144,15 @@ const logoInterval = 400 * time.Millisecond
 const logoBackoff = 30 * time.Minute
 
 // Path returns the on-disk path for a remote URL, whether or not it exists.
-func (c *LogoCache) Path(url string) string {
-	sum := sha1.Sum([]byte(url))
-	name := hex.EncodeToString(sum[:]) + extensionOf(url)
+func (c *LogoCache) Path(rawURL string) string {
+	sum := sha1.Sum([]byte(rawURL))
+	name := hex.EncodeToString(sum[:]) + extensionOf(rawURL)
 	return filepath.Join(c.dir, name)
 }
 
-func extensionOf(url string) string {
-	if i := strings.LastIndex(url, "."); i >= 0 && len(url)-i <= 5 {
-		ext := url[i:]
+func extensionOf(rawURL string) string {
+	if i := strings.LastIndex(rawURL, "."); i >= 0 && len(rawURL)-i <= 5 {
+		ext := rawURL[i:]
 		if !strings.ContainsAny(ext, "/?&") {
 			return ext
 		}
@@ -121,21 +161,21 @@ func extensionOf(url string) string {
 }
 
 // Has reports whether a URL is available locally, from the cache or a pack.
-func (c *LogoCache) Has(url string) bool {
-	return c.Resolve(url) != ""
+func (c *LogoCache) Has(rawURL string) bool {
+	return c.Resolve(rawURL) != ""
 }
 
 // Resolve returns the local file backing a URL, preferring the downloaded
 // cache and falling back to a supplied pack. Empty when neither has it.
-func (c *LogoCache) Resolve(url string) string {
-	if url == "" {
+func (c *LogoCache) Resolve(rawURL string) string {
+	if rawURL == "" {
 		return ""
 	}
-	if p := c.Path(url); fileHasContent(p) {
+	if p := c.Path(rawURL); fileHasContent(p) {
 		return p
 	}
 	if c.seed != "" {
-		if p := filepath.Join(c.seed, filepath.Base(c.Path(url))); fileHasContent(p) {
+		if p := filepath.Join(c.seed, filepath.Base(c.Path(rawURL))); fileHasContent(p) {
 			return p
 		}
 	}
@@ -148,17 +188,17 @@ func fileHasContent(path string) bool {
 }
 
 // Fetch downloads a logo unless it is already cached, and returns its path.
-func (c *LogoCache) Fetch(ctx context.Context, url, userAgent string) (string, error) {
-	if url == "" {
+func (c *LogoCache) Fetch(ctx context.Context, rawURL, userAgent string) (string, error) {
+	if rawURL == "" {
 		return "", fmt.Errorf("empty logo url")
 	}
-	if local := c.Resolve(url); local != "" {
+	if local := c.Resolve(rawURL); local != "" {
 		return local, nil
 	}
-	path := c.Path(url)
+	path := c.Path(rawURL)
 
 	c.mu.Lock()
-	if time.Now().Before(c.backoffUntil) {
+	if time.Now().Before(c.backoffUntil[hostOf(rawURL)]) {
 		c.mu.Unlock()
 		return "", ErrBackoff
 	}
@@ -176,7 +216,7 @@ func (c *LogoCache) Fetch(ctx context.Context, url, userAgent string) (string, e
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -189,12 +229,20 @@ func (c *LogoCache) Fetch(ctx context.Context, url, userAgent string) (string, e
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
 		c.mu.Lock()
-		c.backoffUntil = time.Now().Add(logoBackoff)
+		c.backoffUntil[hostOf(rawURL)] = time.Now().Add(logoBackoff)
 		c.mu.Unlock()
 		return "", ErrBackoff
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		// MediaWiki will not upscale: asking for a 128px thumbnail of an
+		// original narrower than that 404s. Fall back to the original file,
+		// which is small anyway for such logos.
+		if orig := originalOf(rawURL); orig != "" && orig != rawURL {
+			return c.Fetch(ctx, orig, userAgent)
+		}
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("logo %s: %s", url, resp.Status)
+		return "", fmt.Errorf("logo %s: %s", rawURL, resp.Status)
 	}
 
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
@@ -236,6 +284,15 @@ const CanonicalLogoWidth = 128
 
 var thumbPathRe = regexp.MustCompile(`^(https?://[^/]+/commons/images)/thumb/([0-9a-f])/([0-9a-f]{2})/(.+?)/\d+px-[^/]+$`)
 var originalPathRe = regexp.MustCompile(`^(https?://[^/]+/commons/images)/([0-9a-f])/([0-9a-f]{2})/([^/]+)$`)
+
+// originalOf turns a commons thumbnail URL back into the original file.
+func originalOf(rawURL string) string {
+	m := thumbPathRe.FindStringSubmatch(rawURL)
+	if m == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", m[1], m[2], m[3], m[4])
+}
 
 // CanonicalLogoURL rewrites any commons image URL — a thumbnail of any width,
 // or the original — to one fixed-width thumbnail.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/contra/omarchy-esports/internal/config"
 	"github.com/contra/omarchy-esports/internal/liquipedia"
+	"github.com/contra/omarchy-esports/internal/logosource"
 	"github.com/contra/omarchy-esports/internal/match"
 	"github.com/contra/omarchy-esports/internal/notify"
 	"github.com/contra/omarchy-esports/internal/spoiler"
@@ -465,6 +466,45 @@ func isMinorEvent(tierType string) bool {
 	return minorEventTypes[strings.ToLower(strings.TrimSpace(tierType))]
 }
 
+// localiseArtwork points every logo at a local file where one exists.
+//
+// This runs on every publish rather than only after a fetch, and touches no
+// network: downloading is a refresh concern, resolving is a presentation one.
+// Keeping them apart means artwork appears as soon as the cache has it —
+// including while Liquipedia is rate limiting us and refreshes are being
+// skipped entirely.
+func (d *Daemon) localiseArtwork(ms []match.Match) {
+	for i := range ms {
+		for j := range ms[i].Opponents {
+			o := &ms[i].Opponents[j]
+
+			// A curated source on the org's own CDN stands in for both
+			// variants; Liquipedia's pair is preferred when cached, since it
+			// is theme-aware.
+			if p := d.logos.Resolve(o.Logo.Light); p != "" {
+				o.Logo.Local = p
+				o.Logo.Light = "file://" + p
+			}
+			if p := d.logos.Resolve(o.Logo.Dark); p != "" {
+				if o.Logo.Local == "" {
+					o.Logo.Local = p
+				}
+				o.Logo.Dark = "file://" + p
+			}
+			if o.Logo.Local != "" {
+				continue
+			}
+			if u := logosource.URLFor(o.Name); u != "" {
+				if p := d.logos.Resolve(u); p != "" {
+					o.Logo.Local = p
+					o.Logo.Light = "file://" + p
+					o.Logo.Dark = "file://" + p
+				}
+			}
+		}
+	}
+}
+
 // logoPriority ranks a fixture by how soon its artwork will be looked at.
 func logoPriority(m *match.Match, now time.Time) int {
 	p := 0
@@ -506,6 +546,43 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 	paused := d.logos.BackingOff()
 	ua := d.lp.UserAgent()
 	downloads := 0
+
+	// localiseTeam resolves one opponent's artwork, preferring what is already
+	// on disk, then a curated source on the org's own CDN, then Liquipedia.
+	//
+	// Liquipedia's copy is kept first when cached because it ships separate
+	// light and dark variants, which follow the omarchy theme. A curated
+	// source is a single file, so it is the fallback rather than the default —
+	// but it is the one that works when Liquipedia is unreachable, and it
+	// spreads artwork requests across many hosts instead of one.
+	localiseCurated := func(name string, l *match.Logo) bool {
+		if strings.HasPrefix(l.Light, "file://") || strings.HasPrefix(l.Dark, "file://") {
+			return false
+		}
+		url := logosource.URLFor(name)
+		if url == "" {
+			return false
+		}
+		if p := d.logos.Resolve(url); p != "" {
+			l.Light, l.Dark, l.Local = "file://"+p, "file://"+p, p
+			return true
+		}
+		if paused || downloads >= maxLogoDownloads {
+			return false
+		}
+		if _, err := d.logos.Fetch(ctx, url, ua); err != nil {
+			if !errors.Is(err, liquipedia.ErrBackoff) {
+				d.logger.Printf("curated logo %s: %v", name, err)
+			}
+			return false
+		}
+		downloads++
+		if p := d.logos.Resolve(url); p != "" {
+			l.Light, l.Dark, l.Local = "file://"+p, "file://"+p, p
+			return true
+		}
+		return false
+	}
 
 	localise := func(l *match.Logo) {
 		// Collapse per-size thumbnails onto one canonical file first, so a
@@ -562,7 +639,14 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 	})
 	for _, i := range order {
 		for j := range ms[i].Opponents {
-			localise(&ms[i].Opponents[j].Logo)
+			o := &ms[i].Opponents[j]
+			// Curated first when Liquipedia's copy is not already on disk:
+			// it is a different host, so it still works when Liquipedia has
+			// rate-limited us.
+			if d.logos.Resolve(o.Logo.Light) == "" && localiseCurated(o.Name, &o.Logo) {
+				continue
+			}
+			localise(&o.Logo)
 		}
 	}
 	// The team index feeds search results, which render the same artwork.
@@ -577,7 +661,8 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 		priv.Teams[k] = e
 	}
 	if downloads > 0 {
-		d.logger.Printf("logo cache: downloaded %d file(s)", downloads)
+		d.logger.Printf("logo cache: downloaded %d file(s) (%d team(s) have a curated source)",
+			downloads, logosource.Count())
 	}
 	// Persist any pause the sweep just incurred.
 	if until := d.logos.BackoffUntil(); until.After(priv.LogoBackoffUntil) {
@@ -778,6 +863,7 @@ func (d *Daemon) publish(priv store.Private, errs []string) error {
 	// the hidden matches without refetching them.
 	staged = d.applyTierFilter(staged)
 	staged = d.applyFollowedFilter(staged)
+	d.localiseArtwork(staged)
 
 	if d.cfg.CatchUp.Enabled {
 		staged = spoiler.ApplyCatchUp(staged, spoiler.CatchUpOptions{
