@@ -227,6 +227,16 @@ check("parseProfiles survives junk", () => {
   eq(Model.parseProfiles("{").length, 0);
   eq(Model.parseProfiles('{"profiles":"nope"}').length, 0);
   eq(Model.parseProfiles('{"profiles":[{"name":"X"}]}').length, 1);
+  // The daemon omits empty lists, so a roster-less profile arrives with no
+  // roster key. Readers dereference .length directly, and in QML a failed
+  // binding renders nothing at all — a missing roster would blank the whole
+  // team detail view, fixtures and recordings included.
+  const bare = Model.parseProfiles('{"profiles":[{"name":"X"}]}')[0];
+  eq(Array.isArray(bare.roster), true, "roster normalised:");
+  eq(bare.roster.length, 0);
+  eq(Array.isArray(bare.fields), true, "fields normalised:");
+  eq(Model.parseProfiles('{"profiles":[{"name":"X","roster":"nope"}]}')[0].roster.length, 0,
+     "a non-array roster is replaced:");
 });
 
 console.log(failures === 0 ? "\nall passed" : `\n${failures} failed`);

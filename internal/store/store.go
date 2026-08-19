@@ -100,6 +100,12 @@ type Private struct {
 	// makes, so these are fetched only for followed teams and refreshed
 	// weekly.
 	TeamProfiles map[string]TeamProfile `json:"teamProfiles,omitempty"`
+	// ProfileRetryAfter holds off a team page that failed or parsed to
+	// nothing. Without it a title that 404s is retried every single refresh,
+	// and since each attempt blocks for a thirty-second rate-limit slot before
+	// the request is even sent, a handful of broken targets turns polling into
+	// a permanent fetch loop.
+	ProfileRetryAfter map[string]time.Time `json:"profileRetryAfter,omitempty"`
 	// TournamentStreams caches broadcast channels discovered from tournament
 	// pages, keyed by tournament page path. These are expensive to fetch
 	// (one rate-limited parse each) and change rarely.

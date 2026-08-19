@@ -94,13 +94,17 @@ ShellRoot {
         onTriggered: app.nowMs = Date.now()
     }
 
-    // Neither file exists before the daemon's first run, and FileView cannot
-    // watch a path that is not there yet.
+    // None of these files exist before the daemon's first run, and FileView
+    // cannot watch a path that is not there yet. profiles.json in particular
+    // is only written once a refresh completes, which on a fresh install or an
+    // upgrade is a whole poll interval away — without retrying, the watch is
+    // never established and the team detail view stays empty until the app is
+    // restarted.
     Timer {
         interval: 4000
-        running: !app.model.ok || app.teamIndex.length === 0
+        running: !app.model.ok || app.teamIndex.length === 0 || app.profiles.length === 0
         repeat: true
-        onTriggered: { stateFile.reload(); teamsFile.reload() }
+        onTriggered: { stateFile.reload(); teamsFile.reload(); profilesFile.reload() }
     }
 
     Process { id: proc }
@@ -743,8 +747,8 @@ ShellRoot {
                             if (app.teamProfile && app.teamProfile.roster.length)
                                 bits.push(app.teamProfile.roster.length + " on roster")
                             bits.push(app.teamDetail.upcoming.length + " upcoming")
-                            bits.push(app.teamRecordings.length + " recordings")
                             bits.push(app.teamDetail.past.length + " played")
+                            bits.push(app.teamRecordings.length + " with a recording")
                             return bits.join(" · ")
                         }
                         color: Theme.muted
@@ -791,10 +795,18 @@ ShellRoot {
                                 for (var v = 0; v < app.teamRecordings.length; v++)
                                     rows.push({ kind: "match", match: app.teamRecordings[v] })
                             }
-                            if (app.teamDetail.past.length) {
+                            // Recordings are drawn from the same played list,
+                            // so anything shown above is skipped here rather
+                            // than rendered a second time.
+                            var rest = []
+                            for (var j = 0; j < app.teamDetail.past.length; j++) {
+                                if (!Model.hasVod(app.teamDetail.past[j]))
+                                    rest.push(app.teamDetail.past[j])
+                            }
+                            if (rest.length) {
                                 rows.push({ kind: "header", text: "PLAYED", hint: "" })
-                                for (var j = 0; j < app.teamDetail.past.length; j++)
-                                    rows.push({ kind: "match", match: app.teamDetail.past[j] })
+                                for (var k = 0; k < rest.length; k++)
+                                    rows.push({ kind: "match", match: rest[k] })
                             }
                             return rows
                         }

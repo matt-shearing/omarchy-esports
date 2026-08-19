@@ -229,12 +229,25 @@ func parseRosterTable(table *html.Node) []RosterPlayer {
 				return n.Type == html.ElementNode && (n.Data == "sup" || hasClass(n, "reference"))
 			})
 		}
-		if p.ID == "" {
+		if p.ID == "" || isStaffRole(p.Position) {
 			continue
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// isStaffRole reports whether a roster row is support staff rather than a
+// player.
+//
+// Counter-Strike pages list the coach inside the active roster table rather
+// than under Organization, so the section guard cannot exclude them and the
+// position column is the only thing that distinguishes them. They already
+// appear in the infobox as "Coaches", so keeping them here would both
+// duplicate that and contradict what this roster claims to be.
+func isStaffRole(position string) bool {
+	return containsAny(strings.ToLower(position),
+		"coach", "manager", "analyst", "staff", "director")
 }
 
 // textWithout is text() with whole subtrees excluded.

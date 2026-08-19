@@ -596,7 +596,18 @@ function parseProfiles(text) {
   if (!text || !String(text).trim()) return []
   try {
     var doc = JSON.parse(text)
-    return Array.isArray(doc.profiles) ? doc.profiles : []
+    if (!Array.isArray(doc.profiles)) return []
+    // The daemon omits empty lists, so a profile with no roster arrives with
+    // no roster *key* at all. Every reader then has to guard before touching
+    // .length, and one that forgets takes the whole view down with it — a
+    // failed binding renders nothing, so a missing roster would blank the
+    // fixtures and recordings alongside it. Normalise once, here.
+    for (var i = 0; i < doc.profiles.length; i++) {
+      var p = doc.profiles[i]
+      if (!Array.isArray(p.roster)) p.roster = []
+      if (!Array.isArray(p.fields)) p.fields = []
+    }
+    return doc.profiles
   } catch (e) {
     return []
   }

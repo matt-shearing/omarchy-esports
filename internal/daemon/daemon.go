@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -782,7 +783,14 @@ const (
 	// with the tickers and tournament pages that the schedule itself depends
 	// on. Two per refresh fills a follow list within a few cycles without ever
 	// making the schedule wait on it.
+	//
+	// This counts attempts, not successes. Counting successes would let a
+	// failing target slip through the cap for free, and the cost being bounded
+	// here is the rate-limit slot, which a failed request spends in full.
 	maxProfileFetches = 2
+	// profileRetry is how long a team page that failed or parsed to nothing is
+	// left alone before being tried again.
+	profileRetry = 24 * time.Hour
 )
 
 // profileTargets lists the (team, wiki) pairs worth holding a profile for.
@@ -843,12 +851,24 @@ func (d *Daemon) fetchTeamProfiles(ctx context.Context, priv *store.Private) {
 		}
 	}
 
-	fetched := 0
+	if priv.ProfileRetryAfter == nil {
+		priv.ProfileRetryAfter = map[string]time.Time{}
+	}
+	for key := range priv.ProfileRetryAfter {
+		if !wanted[key] {
+			delete(priv.ProfileRetryAfter, key)
+		}
+	}
+
+	attempts := 0
 	for _, t := range targets {
-		if fetched >= maxProfileFetches {
+		if attempts >= maxProfileFetches {
 			break
 		}
 		if p, ok := priv.TeamProfiles[t.Key]; ok && time.Since(p.FetchedAt) < profileTTL {
+			continue
+		}
+		if until, ok := priv.ProfileRetryAfter[t.Key]; ok && time.Now().Before(until) {
 			continue
 		}
 		page := t.Page
@@ -857,17 +877,31 @@ func (d *Daemon) fetchTeamProfiles(ctx context.Context, priv *store.Private) {
 		}
 		title := strings.TrimPrefix(strings.TrimPrefix(page, "/"+t.Wiki+"/"), "/")
 
+		// Counted before the call: the rate-limit slot is spent whether or not
+		// the page comes back.
+		attempts++
 		html, err := d.lp.ParsePage(ctx, t.Wiki, title, profileTTL)
 		if err != nil {
 			d.logger.Printf("profile %s: %v", t.Key, err)
+			priv.ProfileRetryAfter[t.Key] = time.Now().Add(profileRetry)
 			continue
 		}
-		fetched++
 		parsed, err := liquipedia.ParseTeam(html)
 		if err != nil {
 			d.logger.Printf("profile %s: %v", t.Key, err)
+			priv.ProfileRetryAfter[t.Key] = time.Now().Add(profileRetry)
 			continue
 		}
+		// A page that yields nothing is a template we do not understand, a
+		// redirect stub, or a disbanded org with only a Former section.
+		// Caching that would pin an empty panel in the UI for a week, so it is
+		// treated as a failure and retried on the slower schedule.
+		if len(parsed.Fields) == 0 && len(parsed.Roster) == 0 {
+			d.logger.Printf("profile %s: page yielded no fields or roster", t.Key)
+			priv.ProfileRetryAfter[t.Key] = time.Now().Add(profileRetry)
+			continue
+		}
+		delete(priv.ProfileRetryAfter, t.Key)
 
 		prof := store.TeamProfile{
 			FetchedAt: time.Now(),
@@ -895,6 +929,9 @@ func (d *Daemon) fetchTeamProfiles(ctx context.Context, priv *store.Private) {
 	}
 }
 
+// resultLabelRe matches infobox rows that exist to state results.
+var resultLabelRe = regexp.MustCompile(`(?i)\b(placement|achievement|result|medal|trophy|title[s]?\s+won|podium|standing)`)
+
 // publishProfiles writes the profiles the UI reads.
 //
 // The roster and the club details carry no results, but an infobox row can:
@@ -908,7 +945,13 @@ func (d *Daemon) publishProfiles(priv store.Private) error {
 		kept := p
 		kept.Fields = nil
 		for _, f := range p.Fields {
-			if spoiler.IsSpoilery(f.Label) || spoiler.IsSpoilery(f.Value) {
+			// The label is checked as well as the value, and separately from
+			// the leak scanner. A row headed "Achievements" or "Best
+			// Placement" is a result whatever notation its value happens to
+			// use, and no pattern can be relied on to recognise every form a
+			// wiki template might write it in.
+			if resultLabelRe.MatchString(f.Label) ||
+				spoiler.IsSpoilery(f.Label) || spoiler.IsSpoilery(f.Value) {
 				dropped++
 				continue
 			}
@@ -937,7 +980,7 @@ func (d *Daemon) warnIfOversubscribed(interval time.Duration) {
 		return
 	}
 	// Each ticker is one parse; tournament enrichment adds up to its own cap.
-	worst := time.Duration(games+d.maxTournamentFetches) * 30 * time.Second
+	worst := time.Duration(games+d.maxTournamentFetches+maxProfileFetches) * 30 * time.Second
 	if worst <= interval {
 		return
 	}

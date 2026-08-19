@@ -231,6 +231,15 @@ func TestPlacementSignal(t *testing.T) {
 			t.Errorf("missed a placement leak: %q", in)
 		}
 	}
+	// Table and infobox notation, which is what a team page actually uses.
+	for _, in := range []string{
+		"3rd-4th", "5th-8th", "Placement: 3rd–4th", "Top 8", "Top-4",
+		"Grand Finalist", "silver medal",
+	} {
+		if !IsSpoilery(in) {
+			t.Errorf("missed placement notation: %q", in)
+		}
+	}
 	// Ordinals are everywhere on a team page and must not trip on their own:
 	// a Dota position is a bare number, and dates carry ordinals too.
 	safe := []string{
@@ -238,6 +247,8 @@ func TestPlacementSignal(t *testing.T) {
 		"Joined 1st January 2026",
 		"3rd position",
 		"21st Century",
+		"1st",
+		"2nd",
 	}
 	for _, in := range safe {
 		if IsSpoilery(in) {

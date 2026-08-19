@@ -53,9 +53,24 @@ var patterns = []pattern{
 	{SignalElimination, regexp.MustCompile(`(?i)\b(eliminat\w*|knocked out|sent home|out of the tournament|ends? .{0,20}run)\b`)},
 	{SignalAdvance, regexp.MustCompile(`(?i)\b(advanc\w*|qualif\w*|through to|into the (?:grand )?final|book(?:s|ed)? (?:their|a) (?:spot|place))\b`)},
 	{SignalTitle, regexp.MustCompile(`(?i)\b(champions?|championship win|lifts? the|wins? it all|takes? the (?:title|trophy|crown)|crowned)\b`)},
-	// Ordinals only count as placements next to placement language, so a
-	// roster's "3rd position" or a date's "1st" does not trip this.
-	{SignalPlacement, regexp.MustCompile(`(?i)(\b\d{1,2}(?:st|nd|rd|th)[\s-]*(?:place|finish|seed\b)|\brunners?[\s-]up\b|\bfinished\s+\d{1,2}(?:st|nd|rd|th)\b|\bgold\s+medal\b)`)},
+	// Placements come in two registers. Prose names them ("1st place",
+	// "runner-up"); tables and infoboxes use bare notation instead — "3rd-4th"
+	// for a shared bracket exit, "Top 8" for a cutoff, "Winner" on its own.
+	// The prose forms alone were not enough for the thing this was added to
+	// guard, which is infobox rows.
+	//
+	// A bare ordinal is deliberately not a placement: a Dota lane is "3rd
+	// position" and dates carry ordinals. An ordinal *range* has no such
+	// innocent reading.
+	{SignalPlacement, regexp.MustCompile(`(?i)(` +
+		`\b\d{1,2}(?:st|nd|rd|th)[\s-]*(?:place|finish|seed\b)` +
+		`|\b\d{1,2}(?:st|nd|rd|th)\s*[-–—]\s*\d{1,2}(?:st|nd|rd|th)\b` +
+		`|\brunners?[\s-]up\b` +
+		`|\bfinished\s+\d{1,2}(?:st|nd|rd|th)\b` +
+		`|\btop[\s-]\d{1,2}\b` +
+		`|\bgrand[\s-]finalists?\b` +
+		`|\b(?:gold|silver|bronze)\s+medal\b` +
+		`)`)},
 	{SignalReaction, regexp.MustCompile(`(?i)\b(insane|unbelievable|shocking|stunning|incredible) (?:comeback|upset|finish|ending|reverse)\b`)},
 }
 

@@ -95,12 +95,17 @@ func TestParseTeamCounterStrike(t *testing.T) {
 	if len(p.Roster) == 0 {
 		t.Fatal("no roster parsed")
 	}
-	if len(p.Roster) > 7 {
-		t.Errorf("roster has %d players, which suggests a former-players table was picked up", len(p.Roster))
+	if len(p.Roster) != 5 {
+		t.Errorf("roster has %d players, want the active five: %+v", len(p.Roster), p.Roster)
 	}
 	for _, r := range p.Roster {
 		if r.ID == "" {
 			t.Errorf("player with no ID: %+v", r)
+		}
+		// This wiki lists the coach inside the active roster table, unlike
+		// Dota 2 which gives staff their own section.
+		if strings.Contains(strings.ToLower(r.Position), "coach") {
+			t.Errorf("coaching staff leaked into the roster: %+v", r)
 		}
 	}
 	// This wiki's infobox uses different labels, which is why fields are a
