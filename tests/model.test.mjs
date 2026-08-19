@@ -191,5 +191,43 @@ check("parseState survives junk", () => {
   ok(!Model.parseState("").ok);
 });
 
+// --- team profiles -------------------------------------------------------
+check("profileFor matches on name and game scope", () => {
+  const profiles = [
+    { name: "Team Falcons", wiki: "dota2", roster: [{ id: "skiter" }] },
+    { name: "Team Falcons", wiki: "counterstrike", roster: [{ id: "karrigan" }] },
+  ];
+  eq(Model.profileFor(profiles, "Team Falcons", "counterstrike").roster[0].id, "karrigan");
+  eq(Model.profileFor(profiles, "team falcons", "dota2").roster[0].id, "skiter",
+     "matching is case-insensitive:");
+  // An org followed across every game has no wiki to ask with.
+  eq(Model.profileFor(profiles, "Team Falcons", "").wiki, "dota2", "unscoped takes the first:");
+  // A scoped ask must not fall back to another game's roster.
+  eq(Model.profileFor(profiles, "Team Falcons", "valorant"), null, "wrong game:");
+  eq(Model.profileFor(profiles, "Nobody", "dota2"), null);
+  eq(Model.profileFor([], "Team Falcons", "dota2"), null);
+});
+
+check("teamVods only lists recordings and stays inside the redaction", () => {
+  const matches = [
+    { state: "finished", wiki: "dota2", startsAt: "2026-01-01T00:00:00Z", tournament: {},
+      opponents: [{ name: "Team Falcons" }, { name: "OG" }], vod: { videoId: "a" } },
+    { state: "finished", wiki: "dota2", startsAt: "2026-01-02T00:00:00Z", tournament: {},
+      opponents: [{ name: "Team Falcons" }, { name: "OG" }] },
+    { state: "upcoming", wiki: "dota2", startsAt: "2026-02-01T00:00:00Z", tournament: {},
+      opponents: [{ name: "Team Falcons" }, { name: "OG" }], vod: { videoId: "b" } },
+  ];
+  const got = Model.teamVods(matches, "Team Falcons", "dota2");
+  eq(got.length, 1, "only finished matches with a vod:");
+  eq(got[0].vod.videoId, "a");
+});
+
+check("parseProfiles survives junk", () => {
+  eq(Model.parseProfiles("").length, 0);
+  eq(Model.parseProfiles("{").length, 0);
+  eq(Model.parseProfiles('{"profiles":"nope"}').length, 0);
+  eq(Model.parseProfiles('{"profiles":[{"name":"X"}]}').length, 1);
+});
+
 console.log(failures === 0 ? "\nall passed" : `\n${failures} failed`);
 process.exit(failures === 0 ? 0 : 1);

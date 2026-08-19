@@ -31,6 +31,10 @@ const (
 	// mere existence of a late game reveals the score before it. See
 	// SeriesLengthLeaks.
 	SignalSeriesLength Signal = "series-length"
+	// SignalPlacement covers finishing positions, which state an outcome
+	// without any of the verbs the outcome pattern looks for. Team pages carry
+	// these in prose and in infobox rows.
+	SignalPlacement Signal = "placement" // "1st place", "runner-up"
 )
 
 type pattern struct {
@@ -49,6 +53,9 @@ var patterns = []pattern{
 	{SignalElimination, regexp.MustCompile(`(?i)\b(eliminat\w*|knocked out|sent home|out of the tournament|ends? .{0,20}run)\b`)},
 	{SignalAdvance, regexp.MustCompile(`(?i)\b(advanc\w*|qualif\w*|through to|into the (?:grand )?final|book(?:s|ed)? (?:their|a) (?:spot|place))\b`)},
 	{SignalTitle, regexp.MustCompile(`(?i)\b(champions?|championship win|lifts? the|wins? it all|takes? the (?:title|trophy|crown)|crowned)\b`)},
+	// Ordinals only count as placements next to placement language, so a
+	// roster's "3rd position" or a date's "1st" does not trip this.
+	{SignalPlacement, regexp.MustCompile(`(?i)(\b\d{1,2}(?:st|nd|rd|th)[\s-]*(?:place|finish|seed\b)|\brunners?[\s-]up\b|\bfinished\s+\d{1,2}(?:st|nd|rd|th)\b|\bgold\s+medal\b)`)},
 	{SignalReaction, regexp.MustCompile(`(?i)\b(insane|unbelievable|shocking|stunning|incredible) (?:comeback|upset|finish|ending|reverse)\b`)},
 }
 
@@ -93,11 +100,20 @@ func ScanVOD(title string, bestOf int) []Signal {
 	return sigs
 }
 
+// isoDateRe matches a calendar date, which a scoreline regex cannot otherwise
+// tell apart from a result: the "12-06" inside "2015-12-06" is two one-or-two
+// digit numbers either side of a dash, exactly like "2-0". Dates are stripped
+// before scanning rather than the score pattern being loosened, because the
+// scoreline is the leak this whole package exists to catch and it should stay
+// as broad as possible.
+var isoDateRe = regexp.MustCompile(`\b\d{4}-\d{1,2}-\d{1,2}\b`)
+
 // Scan reports which result-leak signals appear in a piece of text.
 func Scan(text string) []Signal {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
+	text = isoDateRe.ReplaceAllString(text, " ")
 	var out []Signal
 	seen := map[Signal]bool{}
 	for _, p := range patterns {

@@ -215,3 +215,61 @@ func TestSeriesLengthForcesBlackout(t *testing.T) {
 		t.Error("series-length signal not recorded")
 	}
 }
+
+// A finishing position states an outcome without using any of the verbs the
+// outcome pattern looks for, and team pages carry them in infobox rows.
+func TestPlacementSignal(t *testing.T) {
+	leaks := []string{
+		"1st place, The International 2026",
+		"Runner-up at BLAST Slam VII",
+		"runners up",
+		"finished 4th",
+		"2nd Place",
+	}
+	for _, in := range leaks {
+		if !IsSpoilery(in) {
+			t.Errorf("missed a placement leak: %q", in)
+		}
+	}
+	// Ordinals are everywhere on a team page and must not trip on their own:
+	// a Dota position is a bare number, and dates carry ordinals too.
+	safe := []string{
+		"Position 3",
+		"Joined 1st January 2026",
+		"3rd position",
+		"21st Century",
+	}
+	for _, in := range safe {
+		if IsSpoilery(in) {
+			t.Errorf("false positive on %q: %v", in, Strings(Scan(in)))
+		}
+	}
+}
+
+// A founding date is not a scoreline. Team infoboxes carry dates like
+// "2015-12-06", whose "12-06" is indistinguishable from "2-0" to the score
+// pattern — which withheld the founding date of every team page.
+func TestDatesAreNotScores(t *testing.T) {
+	safe := []string{
+		"2015-12-06",
+		"Created: 2015-12-06",
+		": 2015-12-06: 2016-06-09",
+		"Joined 2023-11-11",
+	}
+	for _, in := range safe {
+		if IsSpoilery(in) {
+			t.Errorf("date treated as a result leak: %q -> %v", in, Strings(Scan(in)))
+		}
+	}
+	// Stripping dates must not blunt the scoreline pattern itself.
+	leaks := map[string]bool{
+		"Spirit 2-0 Falcons":               true,
+		"Spirit 2-0 Falcons on 2026-08-13": true,
+		"16:14 on 2026-08-13":              true,
+	}
+	for in := range leaks {
+		if !IsSpoilery(in) {
+			t.Errorf("missed a scoreline: %q", in)
+		}
+	}
+}

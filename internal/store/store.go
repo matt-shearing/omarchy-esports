@@ -93,6 +93,13 @@ type Private struct {
 	// DirectorySweeps records when each wiki's team directory was last
 	// enumerated, so a sweep is not repeated on every refresh.
 	DirectorySweeps map[string]time.Time `json:"directorySweeps"`
+	// TeamProfiles caches what a team's own Liquipedia page says about the
+	// organisation and its roster, keyed by "<wiki>/<lowercased name>".
+	//
+	// Each entry costs one action=parse, the most rate-limited call the daemon
+	// makes, so these are fetched only for followed teams and refreshed
+	// weekly.
+	TeamProfiles map[string]TeamProfile `json:"teamProfiles,omitempty"`
 	// TournamentStreams caches broadcast channels discovered from tournament
 	// pages, keyed by tournament page path. These are expensive to fetch
 	// (one rate-limited parse each) and change rarely.
@@ -349,6 +356,61 @@ func (s *Store) SaveTeams(teams []TeamEntry) error {
 	return writeJSON(s.TeamsPath(), map[string]any{
 		"version": CurrentVersion,
 		"teams":   teams,
+	}, 0o644)
+}
+
+// TeamProfile is a cached team page.
+//
+// The field list is deliberately open rather than a fixed struct: the infobox
+// template differs per wiki, so Counter-Strike pages carry "In-Game Leader"
+// and "Games" where Dota 2 pages carry "Team Captain" and "Director".
+type TeamProfile struct {
+	FetchedAt time.Time       `json:"fetchedAt"`
+	Name      string          `json:"name"`
+	Wiki      string          `json:"wiki"`
+	Game      string          `json:"game,omitempty"`
+	Page      string          `json:"page,omitempty"`
+	Fields    []ProfileField  `json:"fields,omitempty"`
+	Roster    []ProfilePlayer `json:"roster,omitempty"`
+}
+
+// ProfileField is one infobox row.
+type ProfileField struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// ProfilePlayer is one member of a team's active roster.
+type ProfilePlayer struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Position string `json:"position,omitempty"`
+	Joined   string `json:"joined,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Captain  bool   `json:"captain,omitempty"`
+	Page     string `json:"page,omitempty"`
+}
+
+// ProfilesPath is the world-readable file the UI reads team profiles from.
+func (s *Store) ProfilesPath() string { return filepath.Join(s.dir, "profiles.json") }
+
+// SaveProfiles publishes team profiles.
+//
+// Kept out of state.json because profiles change weekly while matches change
+// every few minutes, and out of teams.json because that file is a directory of
+// several thousand names the UI loads to power search.
+func (s *Store) SaveProfiles(profiles []TeamProfile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sort.SliceStable(profiles, func(i, j int) bool {
+		if profiles[i].Name != profiles[j].Name {
+			return profiles[i].Name < profiles[j].Name
+		}
+		return profiles[i].Wiki < profiles[j].Wiki
+	})
+	return writeJSON(s.ProfilesPath(), map[string]any{
+		"version":  CurrentVersion,
+		"profiles": profiles,
 	}, 0o644)
 }
 

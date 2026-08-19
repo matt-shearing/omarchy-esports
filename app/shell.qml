@@ -16,6 +16,7 @@ ShellRoot {
 
     property var model: Model.parseState("")
     property var teamIndex: []
+    property var profiles: []
     property double nowMs: Date.now()
     property string tab: "upcoming"
     property string busy: ""
@@ -48,6 +49,16 @@ ShellRoot {
         printErrors: false
         onLoaded: app.model = Model.parseState(text())
         onLoadFailed: app.model = Model.parseState("")
+        onFileChanged: reload()
+    }
+
+    FileView {
+        id: profilesFile
+        path: app.stateDir + "/profiles.json"
+        watchChanges: true
+        printErrors: false
+        onLoaded: app.profiles = Model.parseProfiles(text())
+        onLoadFailed: app.profiles = []
         onFileChanged: reload()
     }
 
@@ -224,6 +235,8 @@ ShellRoot {
     readonly property var indexGames: Model.filterGames(config, teamIndex)
     property string selectedTeamWiki: ""
     readonly property var teamDetail: Model.teamMatches(model.matches, selectedTeam, selectedTeamWiki)
+    readonly property var teamProfile: Model.profileFor(profiles, selectedTeam, selectedTeamWiki)
+    readonly property var teamRecordings: Model.teamVods(model.matches, selectedTeam, selectedTeamWiki)
 
     FloatingWindow {
         id: win
@@ -706,9 +719,47 @@ ShellRoot {
                         }
                     }
 
+                    // Club details from the team's own page, when we hold them.
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 14
+                        visible: app.teamProfile !== null
+
+                        Repeater {
+                            model: app.teamProfile ? app.teamProfile.fields : []
+                            delegate: Text {
+                                required property var modelData
+                                text: modelData.label + ": " + modelData.value
+                                color: Theme.muted
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontCaption
+                            }
+                        }
+                    }
+
                     Text {
-                        text: app.teamDetail.upcoming.length + " upcoming · " +
-                              app.teamDetail.past.length + " played"
+                        text: {
+                            var bits = []
+                            if (app.teamProfile && app.teamProfile.roster.length)
+                                bits.push(app.teamProfile.roster.length + " on roster")
+                            bits.push(app.teamDetail.upcoming.length + " upcoming")
+                            bits.push(app.teamRecordings.length + " recordings")
+                            bits.push(app.teamDetail.past.length + " played")
+                            return bits.join(" · ")
+                        }
+                        color: Theme.muted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                    }
+
+                    // Profiles cost a rate-limited page fetch each, so they are
+                    // only held for followed teams. Say so rather than leaving
+                    // an unexplained gap.
+                    Text {
+                        visible: app.teamProfile === null
+                        text: app.isFollowed(app.selectedTeam, app.selectedTeamWiki)
+                            ? "Roster and club details load on the next refresh."
+                            : "Follow this team to load its roster and club details."
                         color: Theme.muted
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontCaption
@@ -724,10 +775,21 @@ ShellRoot {
 
                         model: {
                             var rows = []
+                            var roster = app.teamProfile ? app.teamProfile.roster : []
+                            if (roster.length) {
+                                rows.push({ kind: "header", text: "ROSTER", hint: "" })
+                                for (var r = 0; r < roster.length; r++)
+                                    rows.push({ kind: "player", player: roster[r] })
+                            }
                             if (app.teamDetail.upcoming.length) {
                                 rows.push({ kind: "header", text: "UPCOMING", hint: "" })
                                 for (var i = 0; i < app.teamDetail.upcoming.length; i++)
                                     rows.push({ kind: "match", match: app.teamDetail.upcoming[i] })
+                            }
+                            if (app.teamRecordings.length) {
+                                rows.push({ kind: "header", text: "RECORDINGS", hint: "" })
+                                for (var v = 0; v < app.teamRecordings.length; v++)
+                                    rows.push({ kind: "match", match: app.teamRecordings[v] })
                             }
                             if (app.teamDetail.past.length) {
                                 rows.push({ kind: "header", text: "PLAYED", hint: "" })
@@ -740,7 +802,13 @@ ShellRoot {
                         delegate: Loader {
                             required property var modelData
                             width: ListView.view.width
-                            sourceComponent: modelData.kind === "header" ? detailHeader : detailCard
+                            sourceComponent: modelData.kind === "header" ? detailHeader
+                                : modelData.kind === "player" ? detailPlayer : detailCard
+
+                            Component {
+                                id: detailPlayer
+                                RosterRow { player: modelData.player }
+                            }
 
                             Component {
                                 id: detailHeader

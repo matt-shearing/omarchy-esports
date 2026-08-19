@@ -591,6 +591,53 @@ function parseConfig(text) {
   }
 }
 
+// parseProfiles decodes profiles.json defensively.
+function parseProfiles(text) {
+  if (!text || !String(text).trim()) return []
+  try {
+    var doc = JSON.parse(text)
+    return Array.isArray(doc.profiles) ? doc.profiles : []
+  } catch (e) {
+    return []
+  }
+}
+
+// profileFor finds a team's cached profile.
+//
+// Profiles are per wiki, because an org's Dota 2 and Counter-Strike pages are
+// separate pages with separate rosters. Asking without a wiki takes whichever
+// is cached, which is what the follow list does when a team is followed across
+// every game.
+function profileFor(profiles, name, wiki) {
+  if (!profiles || !profiles.length) return null
+  var n = String(name || "").toLowerCase().trim()
+  if (!n) return null
+  var scope = String(wiki || "").toLowerCase().trim()
+  var loose = null
+  for (var i = 0; i < profiles.length; i++) {
+    var p = profiles[i]
+    if (String(p.name || "").toLowerCase().trim() !== n) continue
+    if (!scope) return p
+    if (String(p.wiki || "").toLowerCase() === scope) return p
+    if (!loose) loose = p
+  }
+  return scope ? null : loose
+}
+
+// teamVods lists a team's watchable recordings, newest first.
+//
+// Drawn from the same redacted matches the rest of the UI reads, so a fixture
+// the catch-up queue has masked arrives here already masked — the profile page
+// cannot become a way around the blackout.
+function teamVods(matches, teamName, wiki) {
+  var past = teamMatches(matches, teamName, wiki).past
+  var out = []
+  for (var i = 0; i < past.length; i++) {
+    if (hasVod(past[i])) out.push(past[i])
+  }
+  return out
+}
+
 // parseTeamIndex decodes teams.json defensively.
 function parseTeamIndex(text) {
   if (!text || !String(text).trim()) return []

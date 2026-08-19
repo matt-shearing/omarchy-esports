@@ -196,6 +196,7 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 
 	d.indexTeams(all, &priv)
 	d.sweepDirectories(ctx, &priv)
+	d.fetchTeamProfiles(ctx, &priv)
 	d.fetchMissingLogos(ctx, &priv)
 	d.cacheLogos(ctx, all, &priv)
 
@@ -214,6 +215,9 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	}
 	if err := d.publishTeams(priv); err != nil {
 		d.logger.Printf("writing team index: %v", err)
+	}
+	if err := d.publishProfiles(priv); err != nil {
+		d.logger.Printf("writing team profiles: %v", err)
 	}
 	return d.publish(priv, errs)
 }
@@ -767,6 +771,155 @@ func (d *Daemon) publishTeams(priv store.Private) error {
 		out = append(out, t)
 	}
 	return d.store.SaveTeams(out)
+}
+
+const (
+	// profileTTL is how long a cached team page stays fresh. Rosters change on
+	// transfer-window timescales, not hourly.
+	profileTTL = 7 * 24 * time.Hour
+	// maxProfileFetches bounds how many team pages one refresh may fetch. Each
+	// is an action=parse and therefore a thirty-second rate-limit slot, shared
+	// with the tickers and tournament pages that the schedule itself depends
+	// on. Two per refresh fills a follow list within a few cycles without ever
+	// making the schedule wait on it.
+	maxProfileFetches = 2
+)
+
+// profileTargets lists the (team, wiki) pairs worth holding a profile for.
+//
+// Only followed teams. Fetching a profile for whatever team is on screen would
+// put a thirty-second rate-limited call behind a search result, and browsing
+// the index would walk straight into the limiter.
+func (d *Daemon) profileTargets(priv *store.Private) []store.TeamEntry {
+	var out []store.TeamEntry
+	seen := map[string]bool{}
+	add := func(e store.TeamEntry) {
+		if e.Name == "" || e.Wiki == "" || seen[e.Key] {
+			return
+		}
+		seen[e.Key] = true
+		out = append(out, e)
+	}
+	for _, follow := range d.cfg.Teams {
+		name := strings.TrimSpace(follow.Name)
+		if name == "" {
+			continue
+		}
+		for _, e := range priv.Teams {
+			if !strings.EqualFold(strings.TrimSpace(e.Name), name) {
+				continue
+			}
+			// An unscoped follow covers every game, so it wants a profile per
+			// wiki the org actually fields a roster in — they are different
+			// pages with different rosters.
+			if follow.Wiki != "" && !strings.EqualFold(follow.Wiki, e.Wiki) {
+				continue
+			}
+			if !d.cfg.WikiEnabled(e.Wiki) {
+				continue
+			}
+			add(e)
+		}
+	}
+	return out
+}
+
+// fetchTeamProfiles keeps profiles for followed teams current.
+func (d *Daemon) fetchTeamProfiles(ctx context.Context, priv *store.Private) {
+	if priv.TeamProfiles == nil {
+		priv.TeamProfiles = map[string]store.TeamProfile{}
+	}
+	targets := d.profileTargets(priv)
+
+	// Drop profiles for teams no longer followed, so unfollowing actually
+	// reclaims the space rather than leaving the page behind.
+	wanted := map[string]bool{}
+	for _, t := range targets {
+		wanted[t.Key] = true
+	}
+	for key := range priv.TeamProfiles {
+		if !wanted[key] {
+			delete(priv.TeamProfiles, key)
+		}
+	}
+
+	fetched := 0
+	for _, t := range targets {
+		if fetched >= maxProfileFetches {
+			break
+		}
+		if p, ok := priv.TeamProfiles[t.Key]; ok && time.Since(p.FetchedAt) < profileTTL {
+			continue
+		}
+		page := t.Page
+		if page == "" {
+			page = strings.ReplaceAll(t.Name, " ", "_")
+		}
+		title := strings.TrimPrefix(strings.TrimPrefix(page, "/"+t.Wiki+"/"), "/")
+
+		html, err := d.lp.ParsePage(ctx, t.Wiki, title, profileTTL)
+		if err != nil {
+			d.logger.Printf("profile %s: %v", t.Key, err)
+			continue
+		}
+		fetched++
+		parsed, err := liquipedia.ParseTeam(html)
+		if err != nil {
+			d.logger.Printf("profile %s: %v", t.Key, err)
+			continue
+		}
+
+		prof := store.TeamProfile{
+			FetchedAt: time.Now(),
+			Name:      t.Name,
+			Wiki:      t.Wiki,
+			Game:      t.Game,
+			Page:      t.Page,
+		}
+		for _, f := range parsed.Fields {
+			prof.Fields = append(prof.Fields, store.ProfileField{Label: f.Label, Value: f.Value})
+		}
+		for _, r := range parsed.Roster {
+			prof.Roster = append(prof.Roster, store.ProfilePlayer{
+				ID: r.ID, Name: r.Name, Position: r.Position,
+				Joined: r.Joined, Country: r.Country, Captain: r.Captain,
+				Page: r.Page,
+			})
+		}
+		priv.TeamProfiles[t.Key] = prof
+		d.logger.Printf("profile %s: %d fields, %d players", t.Key, len(prof.Fields), len(prof.Roster))
+	}
+	if pending := len(targets) - len(priv.TeamProfiles); pending > 0 {
+		d.logger.Printf("profiles: %d of %d cached, rest follow on later refreshes",
+			len(priv.TeamProfiles), len(targets))
+	}
+}
+
+// publishProfiles writes the profiles the UI reads.
+//
+// The roster and the club details carry no results, but an infobox row can:
+// templates vary by wiki and some carry achievements or placements outright.
+// Rather than allow-listing labels, which would silently drop useful rows a
+// wiki adds later, every row goes through the same scanner the VOD titles use.
+func (d *Daemon) publishProfiles(priv store.Private) error {
+	out := make([]store.TeamProfile, 0, len(priv.TeamProfiles))
+	dropped := 0
+	for _, p := range priv.TeamProfiles {
+		kept := p
+		kept.Fields = nil
+		for _, f := range p.Fields {
+			if spoiler.IsSpoilery(f.Label) || spoiler.IsSpoilery(f.Value) {
+				dropped++
+				continue
+			}
+			kept.Fields = append(kept.Fields, f)
+		}
+		out = append(out, kept)
+	}
+	if dropped > 0 {
+		d.logger.Printf("profiles: withheld %d result-bearing field(s)", dropped)
+	}
+	return d.store.SaveProfiles(out)
 }
 
 // warnIfOversubscribed points out when the enabled games cannot be fetched
