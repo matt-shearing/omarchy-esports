@@ -279,3 +279,45 @@ func TestPerWikiQueueHeads(t *testing.T) {
 		t.Errorf("expected a queue head per wiki, got d1=%v c1=%v", out[0].QueueHead, out[1].QueueHead)
 	}
 }
+
+// A recovered VOD makes an old match a backlog again. Without this, a backfill
+// that reaches back past the ordinary window would unmask the whole bracket
+// the recovered match sits in — seeing who a team played next reveals that
+// they won the match you are about to watch.
+func TestVODKeepsAnOldMatchInTheBacklog(t *testing.T) {
+	now := time.Now()
+	ms := scenario(now)
+	// Older than the 24h window, but a backfill has just found the VODs.
+	ms[0].StartsAt = now.Add(-5 * 24 * time.Hour)
+	ms[1].StartsAt = now.Add(-4 * 24 * time.Hour)
+
+	out := ApplyCatchUp(ms, defaultOpts(now))
+
+	if !out[0].QueueHead {
+		t.Error("the oldest unwatched match with a VOD should be the queue head")
+	}
+	if !out[1].Masked {
+		t.Error("a later match must be masked by a VOD-backed backlog")
+	}
+	if out[1].Opponents[1].Name != "" {
+		t.Errorf("opponent leaked: %q", out[1].Opponents[1].Name)
+	}
+	if !out[2].Masked {
+		t.Error("the upcoming fixture must be masked too")
+	}
+}
+
+// The VOD override is bounded, so a match nobody will ever watch cannot hold
+// the mask open indefinitely.
+func TestVODBacklogIsBounded(t *testing.T) {
+	now := time.Now()
+	ms := scenario(now)
+	ms[0].StartsAt = now.Add(-40 * 24 * time.Hour)
+	ms[1].StartsAt = now.Add(-39 * 24 * time.Hour)
+
+	for _, m := range ApplyCatchUp(ms, defaultOpts(now)) {
+		if m.Masked {
+			t.Errorf("match %s masked by a backlog far outside every window", m.ID)
+		}
+	}
+}
