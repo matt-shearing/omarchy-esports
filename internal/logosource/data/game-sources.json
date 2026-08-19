@@ -19,5 +19,228 @@
     "map being incomplete is not a bug."
   ],
   "version": 1,
-  "games": {}
+  "games": {
+    "counterstrike": {
+      "url": "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/csgo_react/global/cs2_icon_color_512x512.png",
+      "source": "https://www.counter-strike.net/",
+      "terms": "none stated — Valve publishes no press kit or brand guidelines for game logos",
+      "note": "square 512x512 png, transparent"
+    },
+    "dota2": {
+      "url": "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/global/dota2_logo_symbol.png",
+      "source": "https://www.dota2.com/",
+      "terms": "none stated — Valve publishes no press kit or brand guidelines for game logos",
+      "note": "634x591 png, transparent; the symbol mark, not the wordmark"
+    },
+    "deadlock": {
+      "url": "https://shared.steamstatic.com/store_item_assets/steam/apps/1422450/logo.png",
+      "source": "https://store.steampowered.com/app/1422450/Deadlock/",
+      "terms": "none stated — Valve publishes no press kit or brand guidelines for game logos",
+      "note": "square 360x360 png, transparent"
+    },
+    "teamfortress": {
+      "url": "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/440/f568912870a4684f9ec76277a1a404dda6bab213.jpg",
+      "source": "https://steamcommunity.com/app/440",
+      "terms": "none stated — Valve publishes no press kit or brand guidelines for game logos",
+      "note": "square 32x32 jpg — the weakest entry; will look soft. No larger square TF2 mark exists on a Valve domain"
+    },
+    "leagueoflegends": {
+      "url": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/content_organization/7021a2a1723523a99d360ed13520bf0aeb9ef248-24x24.svg?w=256&fm=png",
+      "source": "https://www.leagueoflegends.com/en-us/",
+      "terms": "FORBIDDEN BY PUBLISHER: Riot Legal Jibber Jabber s5 — \"you may not use any of our logos or trademarks anywhere in your Project or on any website\"; s3 names icons specifically. Shipped by explicit decision of the project owner.",
+      "note": "square 256x256 png via Riot's own CDN transform, RGBA"
+    },
+    "valorant": {
+      "url": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/news/cbf4460132cdfeb2a97fad5f9dd25ba0bc058f76-128x128.png",
+      "source": "https://playvalorant.com/en-us/",
+      "terms": "FORBIDDEN BY PUBLISHER: Riot Legal Jibber Jabber s5 — \"you may not use any of our logos or trademarks anywhere in your Project or on any website\"; s3 names icons specifically. Shipped by explicit decision of the project owner.",
+      "note": "square 128x128 png, palette + tRNS transparency"
+    },
+    "wildrift": {
+      "url": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/content_organization/20aeb6046d11ff197c4eeb93150853ddf2ff14c0-128x128.png",
+      "source": "https://wildrift.leagueoflegends.com/en-us/",
+      "terms": "FORBIDDEN BY PUBLISHER: Riot Legal Jibber Jabber s5 — \"you may not use any of our logos or trademarks anywhere in your Project or on any website\"; s3 names icons specifically. Shipped by explicit decision of the project owner.",
+      "note": "square 128x128 png"
+    },
+    "tft": {
+      "url": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/news/dd3cb71804eae400eb69fa6560254878beb1417f-2105x2190.png?w=256&fm=png",
+      "source": "https://teamfighttactics.leagueoflegends.com/en-us/",
+      "terms": "FORBIDDEN BY PUBLISHER: Riot Legal Jibber Jabber s5 — \"you may not use any of our logos or trademarks anywhere in your Project or on any website\"; s3 names icons specifically. Shipped by explicit decision of the project owner.",
+      "note": "256x266 png via Riot's own CDN transform, RGBA"
+    },
+    "overwatch": {
+      "url": "https://forge.akamaized.net/icons/overwatch-2.svg",
+      "source": "https://navbar.blizzard.com/static/v1/nav.js",
+      "terms": "FORBIDDEN BY PUBLISHER: Blizzard Websites Terms of Use license Materials \"for your personal use only\" and bar transmitting them \"to any other Website or network\". Arguably a per-user fetch to one's own machine is personal use. Shipped by explicit decision of the project owner.",
+      "note": "square 48x48 svg, transparent ground. Blizzard's forge host serves SVG only"
+    },
+    "starcraft2": {
+      "url": "https://forge.akamaized.net/icons/starcraft-II.svg",
+      "source": "https://navbar.blizzard.com/static/v1/nav.js",
+      "terms": "FORBIDDEN BY PUBLISHER: Blizzard Websites Terms of Use license Materials \"for your personal use only\" and bar transmitting them \"to any other Website or network\". Arguably a per-user fetch to one's own machine is personal use. Shipped by explicit decision of the project owner.",
+      "note": "square 48x48 svg, transparent ground. Blizzard's forge host serves SVG only"
+    },
+    "starcraft": {
+      "url": "https://forge.akamaized.net/icons/starcraft.svg",
+      "source": "https://navbar.blizzard.com/static/v1/nav.js",
+      "terms": "FORBIDDEN BY PUBLISHER: Blizzard Websites Terms of Use license Materials \"for your personal use only\" and bar transmitting them \"to any other Website or network\". Arguably a per-user fetch to one's own machine is personal use. Shipped by explicit decision of the project owner.",
+      "note": "square 48x48 svg, transparent ground. Blizzard's forge host serves SVG only"
+    },
+    "warcraft": {
+      "url": "https://forge.akamaized.net/icons/warcraft-III.svg",
+      "source": "https://navbar.blizzard.com/static/v1/nav.js",
+      "terms": "FORBIDDEN BY PUBLISHER: Blizzard Websites Terms of Use license Materials \"for your personal use only\" and bar transmitting them \"to any other Website or network\". Arguably a per-user fetch to one's own machine is personal use. Shipped by explicit decision of the project owner.",
+      "note": "square 48x48 svg, transparent ground. Blizzard's forge host serves SVG only"
+    },
+    "heroes": {
+      "url": "https://forge.akamaized.net/icons/heroes-of-the-storm.svg",
+      "source": "https://navbar.blizzard.com/static/v1/nav.js",
+      "terms": "FORBIDDEN BY PUBLISHER: Blizzard Websites Terms of Use license Materials \"for your personal use only\" and bar transmitting them \"to any other Website or network\". Arguably a per-user fetch to one's own machine is personal use. Shipped by explicit decision of the project owner.",
+      "note": "square 48x48 svg, transparent ground. Blizzard's forge host serves SVG only"
+    },
+    "hearthstone": {
+      "url": "https://forge.akamaized.net/icons/hearthstone.svg",
+      "source": "https://navbar.blizzard.com/static/v1/nav.js",
+      "terms": "FORBIDDEN BY PUBLISHER: Blizzard Websites Terms of Use license Materials \"for your personal use only\" and bar transmitting them \"to any other Website or network\". Arguably a per-user fetch to one's own machine is personal use. Shipped by explicit decision of the project owner.",
+      "note": "square 48x48 svg, transparent ground. Blizzard's forge host serves SVG only"
+    },
+    "worldofwarcraft": {
+      "url": "https://forge.akamaized.net/icons/world-of-warcraft.svg",
+      "source": "https://navbar.blizzard.com/static/v1/nav.js",
+      "terms": "FORBIDDEN BY PUBLISHER: Blizzard Websites Terms of Use license Materials \"for your personal use only\" and bar transmitting them \"to any other Website or network\". Arguably a per-user fetch to one's own machine is personal use. Shipped by explicit decision of the project owner.",
+      "note": "square 48x48 svg, transparent ground. Blizzard's forge host serves SVG only"
+    },
+    "rocketleague": {
+      "url": "https://store-images.s-microsoft.com/image/apps.1307.65187692735347017.6779cc69-c491-4e54-8aee-77ef6d129aea.cc6b8c14-9d82-4a06-8d07-a71bdf05e136?q=90&w=300&h=300",
+      "source": "https://www.xbox.com/en-us/games/store/rocket-league/c125w9bg2k0v",
+      "terms": "none stated",
+      "note": "square 300x300 jpg store tile (key art with logo, opaque). rocketleague.com 403s non-browser clients"
+    },
+    "apexlegends": {
+      "url": "https://store-images.s-microsoft.com/image/apps.6205.71371076658790719.3dbfb588-82d5-4f2a-9c18-f4150199c9bb.9581935f-d4b3-43e7-ab50-e2fe9991001e?q=90&w=300&h=300",
+      "source": "https://www.xbox.com/en-US/games/store/apex-legends/bv9ml45j2q5v",
+      "terms": "none stated",
+      "note": "square 300x300 jpg store tile"
+    },
+    "callofduty": {
+      "url": "https://store-images.s-microsoft.com/image/apps.20113.14316447222402733.2a2c0a8b-5bb1-43ef-b65a-26266ed366cf.16710f79-3906-4fc0-ab07-cd9baa55d996",
+      "source": "https://www.xbox.com/en-US/games/store/call-of-duty-black-ops-7/9N8KMNW6942X",
+      "terms": "none stated",
+      "note": "square 300x300 jpg, publisher-supplied app icon rather than cropped key art. Title-specific (Black Ops 7)"
+    },
+    "halo": {
+      "url": "https://store-images.s-microsoft.com/image/apps.52504.14330850369313893.a687698c-b891-44f6-9576-fe28978ce915.95e011f8-5d23-40a4-abde-4ae00a4bb6f7",
+      "source": "https://www.xbox.com/en-US/games/store/halo-infinite/9pp5g1f0c2b6",
+      "terms": "none stated",
+      "note": "square 300x300 jpg app icon; publisher is Xbox Game Studios so this CDN is their own"
+    },
+    "rainbowsix": {
+      "url": "https://static-dm.ubisoft.com/siege/prod/r6x_favicon_152.png",
+      "source": "https://www.ubisoft.com/en-us/game/rainbow-six/siege",
+      "terms": "none stated",
+      "note": "square 152x152 png on Ubisoft's own Siege CDN; a true icon mark"
+    },
+    "easportsfc": {
+      "url": "https://store-images.s-microsoft.com/image/apps.61743.14143997528953872.6dedfcb1-25c9-4700-a587-b5e8d2190c68.88681c0c-1bb4-4ea7-9c95-56273826d126?q=90&w=300&h=300",
+      "source": "https://www.xbox.com/en-US/games/store/ea-sports-fc-26-xbox-series-xs/9p9ftxpkq35p",
+      "terms": "none stated",
+      "note": "square 300x300 jpg cover art, edition-specific to FC 26"
+    },
+    "trackmania": {
+      "url": "https://www.trackmania.com/build/images/tm-logo.9b809b61.png",
+      "source": "https://www.trackmania.com/",
+      "terms": "none stated",
+      "note": "WIDE WORDMARK 609x191 (3.2:1) — no square Trackmania mark exists on any publisher surface"
+    },
+    "osu": {
+      "url": "https://raw.githubusercontent.com/ppy/osu-wiki/master/wiki/Brand_identity_guidelines/img/usage-full-colour.png",
+      "source": "https://osu.ppy.sh/wiki/en/Brand_identity_guidelines",
+      "terms": "PERMITTED: \"All use does not require approval.\" Requires the logo be used unmodified — no recolouring, rotation or aspect-ratio change.",
+      "note": "square 200x200 png, the full-colour osu! cookie. The only source in this file with explicit permission"
+    },
+    "splatoon": {
+      "url": "https://www.nintendo.com/eu/media/images/11_square_images/games_18/nintendo_switch_5/1x1_nswitch_splatoon3_old/1x1_NSwitch_Splatoon3_image500w.jpg",
+      "source": "https://searching.nintendo-europe.com/en/select?q=splatoon+3&fq=type%3AGAME",
+      "terms": "none stated",
+      "note": "square 500x500 jpg eShop tile on nintendo.com; cover art rather than an isolated mark"
+    },
+    "pokemon": {
+      "url": "https://unite.pokemon.com/favicons/apple-touch-icon.png",
+      "source": "https://unite.pokemon.com/en-us/",
+      "terms": "none stated",
+      "note": "square 180x180 png. Pokemon UNITE chosen because VGC is a format, not a titled product"
+    },
+    "simracing": {
+      "url": "https://s100.iracing.com/wp-content/uploads/2020/09/iRacing-Logo-Blue-Square-R.png",
+      "source": "https://www.iracing.com/",
+      "terms": "none stated",
+      "note": "1200x1138 png. iRacing chosen as the most representative sim racing esport"
+    },
+    "marvelrivals": {
+      "url": "https://store-images.s-microsoft.com/image/apps.12406.14045436403630681.c70cac11-7310-4479-a40b-b44dba150cea.8e9770c9-0c1b-4531-81f5-4a7236019e1c?q=90&w=300&h=300",
+      "source": "https://www.xbox.com/en-US/games/store/marvel-rivals/9n8pmw7qmd3d",
+      "terms": "none stated",
+      "note": "square 300x300 jpg store tile"
+    },
+    "pubg": {
+      "url": "https://wstatic-prod.pubg.com/web/live/static/favicons/android-icon-192x192.png",
+      "source": "https://www.pubg.com/en",
+      "terms": "KRAFTON Brand Resource Center: \"All rights, including the intellectual property rights, of the brand assets belong to KRAFTON, Inc. Their commercial use must be approved in advance by KRAFTON.\"",
+      "note": "square 192x192 png on KRAFTON's own CDN"
+    },
+    "mobilelegends": {
+      "url": "https://akmweb.youngjoygame.com/web/gms/image/1d4439a2ab14e995b99fd8934adb34ee.svg",
+      "source": "https://www.mobilelegends.com/",
+      "terms": "none stated",
+      "note": "square 120x120 svg on Moonton's own CDN — preferred over the App Store icon because it is publisher-controlled"
+    },
+    "honorofkings": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/6c/9c/73/6c9c73a3-b6d8-6f98-a7c2-00de2f82a240/AppIcon-1x_U007emarketing-0-7-0-85-220-0.png/256x256bb.png",
+      "source": "https://apps.apple.com/ (listing by PROXIMA BETA PTE. LIMITED, Tencent/Level Infinite)",
+      "terms": "none stated",
+      "note": "square 256x256 png, publisher-submitted app icon. honorofkings.com serves only an .ico"
+    },
+    "naraka": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Purple116/v4/f1/18/cc/f118cc74-2eb4-1fb9-a774-2afd3a13c0d6/AppIcon-1x_U007emarketing-0-5-0-0-85-220.png/256x256bb.png",
+      "source": "https://apps.apple.com/us/app/naraka/id1578228192",
+      "terms": "none stated",
+      "note": "square 256x256 png. CAVEAT: this is NetEase's official NARAKA companion app icon, not the BLADEPOINT client's"
+    },
+    "freefire": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/95/16/f3/9516f314-4151-38f7-7d61-47bbc24f5406/AppIcon-1785257489-0-0-1x_U007emarketing-0-8-0-85-220.png/256x256bb.png",
+      "source": "https://apps.apple.com/ (listing by GARENA INTERNATIONAL I PRIVATE LIMITED)",
+      "terms": "none stated",
+      "note": "square 256x256 png, publisher-submitted app icon"
+    },
+    "brawlstars": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d2/15/b1/d215b17b-b984-732c-0d74-41a45bbcb77d/AppIcon-0-0-1x_U007epad-0-1-85-220.png/256x256bb.png",
+      "source": "https://apps.apple.com/ (listing by Supercell Oy)",
+      "terms": "Supercell Fan Content Policy: non-commercial use limited to displaying and identifying Supercell products, assets unmodified, no implication of endorsement, and the notice \"This material is unofficial and is not endorsed by Supercell.\"",
+      "note": "square 256x256 png, publisher-submitted app icon"
+    },
+    "clashroyale": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/00/03/be/0003befa-32c7-172d-ce3b-2197bf10ca0f/AppIcon-0-0-1x_U007emarketing-0-7-0-85-220.png/256x256bb.png",
+      "source": "https://apps.apple.com/ (listing by Supercell Oy)",
+      "terms": "Supercell Fan Content Policy: non-commercial use limited to displaying and identifying Supercell products, assets unmodified, no implication of endorsement, and the notice \"This material is unofficial and is not endorsed by Supercell.\"",
+      "note": "square 256x256 png, publisher-submitted app icon"
+    },
+    "crossfire": {
+      "url": "https://www.crossfire.com/assets-site/images/favicon.png",
+      "source": "https://www.crossfire.com/",
+      "terms": "none stated",
+      "note": "square 32x32 png — weak, will look soft. Nothing larger exists on a reachable Smilegate/Z8Games domain"
+    },
+    "criticalops": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/66/b0/d5/66b0d5c1-75fd-fd4c-4335-d6f7deb5ea4f/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/256x256bb.png",
+      "source": "https://apps.apple.com/ (listing by Critical Force Oy)",
+      "terms": "none stated",
+      "note": "square 256x256 png, publisher-submitted app icon"
+    },
+    "autochess": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/61/1f/b0/611fb0ec-1f4b-dd1e-d61e-dadb3c0b347b/AppIcon-1x_U007epad-0-11-0-85-220-0.png/256x256bb.png",
+      "source": "https://apps.apple.com/ (listing by Long Entertainment, Dragonest)",
+      "terms": "none stated",
+      "note": "square 256x256 png, publisher-submitted app icon"
+    }
+  }
 }

@@ -969,37 +969,70 @@ func (d *Daemon) publishProfiles(priv store.Private) error {
 	return d.store.SaveProfiles(out)
 }
 
-// maxGameIconDownloads bounds artwork fetches per refresh. These are small,
-// few, and fetched once ever, but a first run with many games enabled should
-// not spend its whole logo budget on them.
-const maxGameIconDownloads = 6
+const (
+	// maxGameIconDownloads bounds artwork fetches per refresh. Generous
+	// because these are small and fetched once ever; the real protection is
+	// the wall-clock budget below.
+	maxGameIconDownloads = 40
+	// gameIconBudget bounds the sweep in time. RefreshOnce holds d.mu for its
+	// whole body and Reevaluate takes the same lock, so a slow sweep stalls
+	// the tick that makes follow toggles and live transitions feel immediate.
+	gameIconBudget = 20 * time.Second
+)
 
-// cacheGameIcons downloads game artwork for enabled games.
+// cacheGameIcons downloads game artwork.
 //
-// Only enabled games: the catalog has 37 entries and a user typically watches
-// a handful, so fetching the rest would be traffic nobody asked for.
+// Enabled games first, then the rest of the catalog a few at a time. The
+// settings grid shows every game, not just the enabled ones, so fetching only
+// what is enabled left most of that grid on its text badge indefinitely and
+// looked half-finished. These are small files fetched once ever — the whole
+// catalog is a few hundred kilobytes — so filling it in over a handful of
+// refreshes costs little and never delays the schedule.
 func (d *Daemon) cacheGameIcons(ctx context.Context) {
 	if d.logos.BackingOff() {
 		return
 	}
 	ua := d.lp.UserAgent()
-	attempts := 0
+
+	order := make([]string, 0, len(config.Catalog))
+	seen := map[string]bool{}
 	for _, w := range d.cfg.EnabledWikis() {
-		if attempts >= maxGameIconDownloads {
-			return
+		if !seen[w.Slug] {
+			seen[w.Slug] = true
+			order = append(order, w.Slug)
 		}
-		url := logosource.GameURLFor(w.Slug)
+	}
+	for _, e := range config.Catalog {
+		if !seen[e.Slug] {
+			seen[e.Slug] = true
+			order = append(order, e.Slug)
+		}
+	}
+
+	attempts, cached := 0, 0
+	deadline := time.Now().Add(gameIconBudget)
+	for _, slug := range order {
+		if attempts >= maxGameIconDownloads || time.Now().After(deadline) {
+			break
+		}
+		url := logosource.GameURLFor(slug)
 		if url == "" || d.logos.Has(url) {
 			continue
 		}
+		// Counted before the call: a failed request spends the same pacing
+		// slot as a successful one.
 		attempts++
 		if _, err := d.logos.Fetch(ctx, url, ua); err != nil {
-			if !errors.Is(err, liquipedia.ErrBackoff) {
-				d.logger.Printf("game icon %s: %v", w.Slug, err)
+			if errors.Is(err, liquipedia.ErrBackoff) {
+				return
 			}
-			return
+			d.logger.Printf("game icon %s: %v", slug, err)
+			continue
 		}
-		d.logger.Printf("game icon %s: cached", w.Slug)
+		cached++
+	}
+	if cached > 0 {
+		d.logger.Printf("game icons: cached %d", cached)
 	}
 }
 
