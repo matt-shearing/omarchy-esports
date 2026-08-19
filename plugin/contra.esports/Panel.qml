@@ -410,7 +410,8 @@ Panel {
                     spacing: Style.space(8)
 
                     Text {
-                        text: root.model.attribution !== "" ? root.model.attribution : "Data from Liquipedia (CC BY-SA 3.0)"
+                        text: (root.model.attribution !== "" ? root.model.attribution
+                            : "Data via Liquipedia (CC BY-SA 3.0)") + " · logos © their owners"
                         color: root.bar ? root.bar.foreground : Color.popups.text
                         opacity: 0.35
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family

@@ -115,7 +115,7 @@ commands:
                      --reset   show the wizard again next time the app opens
                      --done    mark setup complete without the wizard
   logos            inspect or fill the local team-artwork cache
-                     status | warm | path
+                     status | warm | path | export [dir]
   games            list known games, and turn them on or off
                      list | on <slug>... | off <slug>...
   search <query>   fuzzy-search the team index
@@ -649,6 +649,44 @@ func cmdLogos(args []string) error {
 	switch action {
 	case "path":
 		fmt.Println(filepath.Join(store.CacheDir(), "logos"))
+		if seed := cache.SeedPath(); seed != "" {
+			fmt.Println(seed + "   (pack, read-only)")
+		}
+		return nil
+
+	case "export":
+		// Copy the cache into a directory that can be shipped or shared, so a
+		// cold install shows real logos immediately instead of monograms.
+		dest := filepath.Join(store.CacheDir(), "logo-pack")
+		if len(args) > 1 {
+			dest = args[1]
+		}
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(filepath.Join(store.CacheDir(), "logos"))
+		if err != nil {
+			return fmt.Errorf("nothing cached yet: %w", err)
+		}
+		n := 0
+		for _, e := range entries {
+			if e.IsDir() || strings.HasSuffix(e.Name(), ".tmp") {
+				continue
+			}
+			src := filepath.Join(store.CacheDir(), "logos", e.Name())
+			data, err := os.ReadFile(src)
+			if err != nil {
+				continue
+			}
+			if err := os.WriteFile(filepath.Join(dest, e.Name()), data, 0o644); err != nil {
+				return err
+			}
+			n++
+		}
+		fmt.Printf("exported %d file(s) to %s\n", n, dest)
+		fmt.Println("Install as a pack with:")
+		fmt.Printf("  cp %s/* ~/.local/share/omarchy-esports/logos/\n", dest)
+		fmt.Println("or point OMARCHY_ESPORTS_LOGO_PACK at it.")
 		return nil
 
 	case "status", "warm":
@@ -680,6 +718,11 @@ func cmdLogos(args []string) error {
 		have := len(wanted) - len(missing)
 		fmt.Printf("artwork cache: %d of %d file(s) present\n", have, len(wanted))
 		fmt.Println("  " + filepath.Join(store.CacheDir(), "logos"))
+		if seed := cache.SeedPath(); seed != "" {
+			if entries, err := os.ReadDir(seed); err == nil && len(entries) > 0 {
+				fmt.Printf("  %s  (pack: %d file(s))\n", seed, len(entries))
+			}
+		}
 
 		if action == "status" {
 			if len(missing) > 0 {
@@ -716,7 +759,7 @@ func cmdLogos(args []string) error {
 		return nil
 
 	default:
-		return fmt.Errorf("unknown logos action %q (want status, warm or path)", action)
+		return fmt.Errorf("unknown logos action %q (want status, warm, path or export)", action)
 	}
 }
 

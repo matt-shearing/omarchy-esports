@@ -127,8 +127,11 @@ type TournamentInfo struct {
 // CurrentVersion is the state schema version.
 const CurrentVersion = 1
 
-// Attribution is the credit line Liquipedia's CC-BY-SA 3.0 licence requires.
-const Attribution = "Match data from Liquipedia (CC BY-SA 3.0)"
+// Attribution is the credit line Liquipedia's CC BY-SA 3.0 licence requires
+// for their text and data. Logos are deliberately excluded from it: they are
+// trademarks of the orgs, carried on Liquipedia under a fair-use claim scoped
+// to Liquipedia's own use, and are not CC BY-SA.
+const Attribution = "Data via Liquipedia (CC BY-SA 3.0)"
 
 // Store reads and writes daemon state.
 type Store struct {

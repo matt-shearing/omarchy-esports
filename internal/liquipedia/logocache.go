@@ -28,7 +28,13 @@ import (
 
 // LogoCache stores team artwork on disk.
 type LogoCache struct {
-	dir  string
+	dir string
+	// seed is an optional read-only directory of pre-supplied artwork,
+	// consulted before the network. It lets a build ship or side-load a logo
+	// pack so a cold install shows real logos immediately, and it rescues
+	// users on networks where Liquipedia's image hosts are unreachable or
+	// rate limited.
+	seed string
 	http *http.Client
 
 	mu sync.Mutex
@@ -70,9 +76,25 @@ func (c *LogoCache) SetBackoffUntil(t time.Time) {
 func NewLogoCache(dir string) *LogoCache {
 	return &LogoCache{
 		dir:  filepath.Join(dir, "logos"),
+		seed: seedDir(),
 		http: &http.Client{Timeout: 30 * time.Second},
 	}
 }
+
+// seedDir locates a pre-supplied logo pack, if one is installed.
+func seedDir() string {
+	if d := os.Getenv("OMARCHY_ESPORTS_LOGO_PACK"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "omarchy-esports", "logos")
+}
+
+// SeedPath returns the pack location, for diagnostics.
+func (c *LogoCache) SeedPath() string { return c.seed }
 
 // logoInterval paces downloads. Artwork is static and cached forever, so this
 // only ever applies to files never seen before.
@@ -98,12 +120,30 @@ func extensionOf(url string) string {
 	return ".png"
 }
 
-// Has reports whether a URL is already cached.
+// Has reports whether a URL is available locally, from the cache or a pack.
 func (c *LogoCache) Has(url string) bool {
+	return c.Resolve(url) != ""
+}
+
+// Resolve returns the local file backing a URL, preferring the downloaded
+// cache and falling back to a supplied pack. Empty when neither has it.
+func (c *LogoCache) Resolve(url string) string {
 	if url == "" {
-		return false
+		return ""
 	}
-	fi, err := os.Stat(c.Path(url))
+	if p := c.Path(url); fileHasContent(p) {
+		return p
+	}
+	if c.seed != "" {
+		if p := filepath.Join(c.seed, filepath.Base(c.Path(url))); fileHasContent(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func fileHasContent(path string) bool {
+	fi, err := os.Stat(path)
 	return err == nil && fi.Size() > 0
 }
 
@@ -112,10 +152,10 @@ func (c *LogoCache) Fetch(ctx context.Context, url, userAgent string) (string, e
 	if url == "" {
 		return "", fmt.Errorf("empty logo url")
 	}
-	path := c.Path(url)
-	if c.Has(url) {
-		return path, nil
+	if local := c.Resolve(url); local != "" {
+		return local, nil
 	}
+	path := c.Path(url)
 
 	c.mu.Lock()
 	if time.Now().Before(c.backoffUntil) {

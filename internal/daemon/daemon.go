@@ -486,9 +486,10 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 	if !priv.LogoBackoffUntil.IsZero() {
 		d.logos.SetBackoffUntil(priv.LogoBackoffUntil)
 	}
-	if d.logos.BackingOff() {
-		return
-	}
+	// Backing off stops downloads, not the use of artwork already on disk.
+	// Returning early here meant a rate limit also hid logos we already had,
+	// which is exactly backwards.
+	paused := d.logos.BackingOff()
 	ua := d.lp.UserAgent()
 	downloads := 0
 
@@ -506,8 +507,8 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 			if remote == "" || d.logos.Has(remote) {
 				continue
 			}
-			if downloads >= maxLogoDownloads {
-				return
+			if paused || downloads >= maxLogoDownloads {
+				continue
 			}
 			if _, err := d.logos.Fetch(ctx, remote, ua); err != nil {
 				if errors.Is(err, liquipedia.ErrBackoff) {
@@ -518,18 +519,18 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 			}
 			downloads++
 		}
-		// Point at whichever variants are cached; the UI falls back to the
-		// remote URL when Local is empty.
-		if d.logos.Has(l.Light) {
-			l.Local = d.logos.Path(l.Light)
-		} else if d.logos.Has(l.Dark) {
-			l.Local = d.logos.Path(l.Dark)
+		// Point at whichever local copy exists — downloaded or from a pack.
+		// The UI keeps the remote URL when neither does, and falls back to a
+		// monogram if that fails too.
+		if p := d.logos.Resolve(l.Light); p != "" {
+			l.Local = p
+			l.Light = "file://" + p
 		}
-		if d.logos.Has(l.Light) {
-			l.Light = "file://" + d.logos.Path(l.Light)
-		}
-		if d.logos.Has(l.Dark) {
-			l.Dark = "file://" + d.logos.Path(l.Dark)
+		if p := d.logos.Resolve(l.Dark); p != "" {
+			if l.Local == "" {
+				l.Local = p
+			}
+			l.Dark = "file://" + p
 		}
 	}
 

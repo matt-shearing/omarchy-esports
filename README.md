@@ -175,18 +175,57 @@ fetched once and cached hard.
 That same page yields the event's YouTube channel ids, which feed the
 `/feeds/videos.xml` RSS endpoint — no key, no quota — to find VODs afterwards.
 
-### Team artwork is cached locally
+### Team artwork: fetched once, cached forever, never redistributed
 
 Logos are downloaded once into `~/.cache/omarchy-esports/logos/` and served
 from disk. The UI originally pointed `Image` elements straight at
-liquipedia.net, which meant every panel open fired dozens of requests for files
-that never change — enough that Liquipedia began replying **HTTP 429** and
-logos silently stopped rendering.
+liquipedia.net, so every panel open fired dozens of requests for files that
+never change — enough to earn **HTTP 429**, at which point logos silently
+stopped rendering.
 
-Caching fixes the rendering, matches their "cache rather than re-request"
-terms, and makes artwork work offline. A 429 pauses downloads for 30 minutes
-rather than retrying; artwork is decoration, and continuing to ask while being
-told to stop is both rude and pointless.
+A typical fixture window needs **77 files**. All commons image URLs collapse to
+one 128px thumbnail per logo, so a team drawn at 35px in one row and 50px in
+another is a single download rather than two. After that it is disk reads
+forever, and artwork works offline.
+
+**Why not ship the logos with the app, or host them?** Because that is the one
+option that is actually risky. Liquipedia carries team logos under a fair-use
+claim explicitly scoped to *their own* use — the file pages say so in terms
+("this file's transformative educational use **on Liquipedia**"), and their
+copyright policy states plainly that images are "not automatically licensed
+under CC-BY-SA 3.0". Some, such as Fnatic's, are held under a permission grant
+made to Liquipedia specifically, which their policy says does not extend to
+third parties.
+
+Fetching to a user's own machine is analogous to a browser cache. Bundling them
+in a release, or re-hosting them, would make this project the entity
+reproducing and distributing thousands of trademarked marks — the one plausible
+takedown vector, and worse in an MIT repo where downstream users reasonably
+assume everything shipped is freely reusable.
+
+Freely-licensed substitutes were investigated and are not viable: of Team
+Liquid, G2, Fnatic, NAVI and Cloud9, **none** has a logo on Wikimedia Commons
+with a clean, rights-holder-granted free licence.
+
+So: fetch once per user, cache forever, back off when asked to stop, and fall
+back to a monogram. This is also what every comparable open-source project
+converged on independently.
+
+**When artwork is unavailable** — a rate limit, a datacentre or VPN egress IP,
+or simply a team the ticker has never shown — the UI draws a monogram from the
+team's own tag. Nothing looks broken.
+
+```bash
+omarchy-esports logos status    # how much artwork is cached
+omarchy-esports logos warm      # fetch what is missing now
+omarchy-esports logos export    # copy the cache into a portable folder
+```
+
+`logos export` exists for moving *your own* cache between *your own* machines —
+useful if the machine running this sits behind a VPN whose egress Liquipedia
+rate-limits. A pack is loaded from
+`~/.local/share/omarchy-esports/logos/`, or `$OMARCHY_ESPORTS_LOGO_PACK`. It is
+deliberately not something this project ships or hosts.
 
 ### Playing nicely with Liquipedia
 
@@ -494,4 +533,17 @@ submission process, the plugin-id decision, and the pre-submission checklist.
 
 ## Licence
 
-MIT. Match data from [Liquipedia](https://liquipedia.net), CC BY-SA 3.0.
+MIT.
+
+Match and team data is sourced from [Liquipedia](https://liquipedia.net) under
+the [Liquipedia API Terms of Use](https://liquipedia.net/api-terms-of-use);
+their text content is available under
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).
+
+Team and organisation logos are trademarks of their respective owners, fetched
+at runtime to each user's own machine for identification purposes only. They
+are **not** covered by Liquipedia's CC BY-SA licence and are **not**
+redistributed as part of this software. Their use here does not imply
+endorsement by, or affiliation with, the teams, the organisations, or
+Liquipedia. If you are a rights holder and want a logo removed, please open an
+issue.

@@ -763,7 +763,8 @@ ShellRoot {
                 Layout.fillWidth: true
 
                 Text {
-                    text: app.model.attribution !== "" ? app.model.attribution : "Match data from Liquipedia (CC BY-SA 3.0)"
+                    text: (app.model.attribution !== "" ? app.model.attribution
+                        : "Data via Liquipedia (CC BY-SA 3.0)") + " · Team logos © their respective owners"
                     color: Theme.muted
                     opacity: 0.7
                     font.family: Theme.fontFamily

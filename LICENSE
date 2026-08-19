@@ -21,3 +21,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Match data is sourced from Liquipedia and is licensed CC BY-SA 3.0.
+
+---
+
+THIRD-PARTY CONTENT
+
+Match and team data is sourced from Liquipedia (https://liquipedia.net) under
+the Liquipedia API Terms of Use. Liquipedia's text content is available under
+CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0/).
+
+Team and organisation logos are trademarks of their respective owners. They are
+fetched at runtime from Liquipedia to each user's own machine for identification
+purposes only, are NOT covered by Liquipedia's CC BY-SA licence, and are NOT
+redistributed as part of this software. Their use here does not imply
+endorsement by, or affiliation with, the teams, the organisations, or
+Liquipedia.
+
+If you are a rights holder and want a logo removed, please open an issue.
