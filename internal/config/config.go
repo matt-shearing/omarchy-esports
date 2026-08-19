@@ -409,6 +409,30 @@ func (c Config) FollowIndex(name, wiki string) int {
 	return -1
 }
 
+// FollowCovers reports whether the follow list already follows a team in a
+// given game.
+//
+// This differs from FollowIndex, which locates one exact entry. An entry with
+// no wiki follows the team in every game, so it covers a game-scoped question
+// without matching it exactly — which is precisely what the UI means when it
+// shows "Following" on a per-game row. Asking with an empty wiki asks the
+// broader question, "followed in any game at all?".
+//
+// Follow and unfollow must both reason in these terms or they disagree with
+// the button the user is looking at.
+func (c Config) FollowCovers(name, wiki string) bool {
+	name = strings.TrimSpace(name)
+	for _, t := range c.Teams {
+		if !strings.EqualFold(strings.TrimSpace(t.Name), name) {
+			continue
+		}
+		if t.Wiki == "" || wiki == "" || strings.EqualFold(t.Wiki, wiki) {
+			return true
+		}
+	}
+	return false
+}
+
 // TeamNames returns the follow list as plain names, for the paths that only
 // need to know which teams matter.
 func (c Config) TeamNames() []string {

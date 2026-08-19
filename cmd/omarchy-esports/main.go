@@ -445,8 +445,25 @@ func cmdTeams(args []string) error {
 	case "add":
 		for _, n := range names {
 			n = strings.TrimSpace(n)
-			if cfg.FollowIndex(n, wiki) >= 0 {
+			// FollowCovers, not FollowIndex: an existing unscoped entry
+			// already follows this team in this game, and adding a scoped
+			// duplicate on top of it leaves two entries for one team that a
+			// later unfollow has to find separately.
+			if cfg.FollowCovers(n, wiki) {
+				fmt.Println("already following", config.Follow{Name: n, Wiki: wiki}.Label())
 				continue
+			}
+			if wiki == "" {
+				// Following with no game means every game, which supersedes
+				// any game-scoped entries for the same team.
+				kept := cfg.Teams[:0]
+				for _, t := range cfg.Teams {
+					if strings.EqualFold(strings.TrimSpace(t.Name), n) {
+						continue
+					}
+					kept = append(kept, t)
+				}
+				cfg.Teams = kept
 			}
 			cfg.Teams = append(cfg.Teams, config.Follow{Name: n, Wiki: wiki})
 			fmt.Println("following", config.Follow{Name: n, Wiki: wiki}.Label())
@@ -455,18 +472,36 @@ func cmdTeams(args []string) error {
 		for _, n := range names {
 			n = strings.TrimSpace(n)
 			kept := cfg.Teams[:0]
+			dropped := 0
 			for _, t := range cfg.Teams {
-				// With no --game, remove every scope for that name; with one,
-				// remove only the matching entry.
+				// With no --game, remove every scope for that name. With one,
+				// remove the matching entry — and also any unscoped entry,
+				// because an unscoped entry is exactly what follows this team
+				// in the game being unfollowed. Leaving it behind meant the
+				// button read "Unfollow", the command reported success, and
+				// the team stayed followed.
 				drop := strings.EqualFold(strings.TrimSpace(t.Name), n) &&
-					(wiki == "" || strings.EqualFold(t.Wiki, wiki))
+					(wiki == "" || t.Wiki == "" || strings.EqualFold(t.Wiki, wiki))
 				if drop {
-					fmt.Println("unfollowed", t.Label())
+					if wiki != "" && t.Wiki == "" {
+						// Say so: this removes more than was literally asked
+						// for, and silently widening a destructive action is
+						// worse than explaining it.
+						fmt.Printf("unfollowed %s — it was followed in every game, not only %s\n",
+							t.Name, wiki)
+					} else {
+						fmt.Println("unfollowed", t.Label())
+					}
+					dropped++
 					continue
 				}
 				kept = append(kept, t)
 			}
 			cfg.Teams = kept
+			if dropped == 0 {
+				fmt.Fprintln(os.Stderr, "not following",
+					config.Follow{Name: n, Wiki: wiki}.Label())
+			}
 		}
 	default:
 		return fmt.Errorf("unknown teams action %q (want list, add or remove)", action)
