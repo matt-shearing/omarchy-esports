@@ -591,6 +591,37 @@ function parseConfig(text) {
   }
 }
 
+// parseGames decodes games.json defensively.
+function parseGames(text) {
+  if (!text || !String(text).trim()) return []
+  try {
+    var doc = JSON.parse(text)
+    return Array.isArray(doc.games) ? doc.games : []
+  } catch (e) {
+    return []
+  }
+}
+
+// gameIconFor returns a local artwork path for a game, or "".
+//
+// Empty is the normal answer for a game with no curated source, or one whose
+// artwork has not been fetched yet, so every caller must have a text fallback.
+function gameIconFor(games, slug) {
+  if (!games || !games.length || !slug) return ""
+  var want = String(slug).toLowerCase().trim()
+  for (var i = 0; i < games.length; i++) {
+    if (String(games[i].slug || "").toLowerCase() === want) {
+      return String(games[i].icon || "")
+    }
+  }
+  return ""
+}
+
+// gameIconForMatch is gameIconFor keyed off a fixture's wiki.
+function gameIconForMatch(games, match) {
+  return match ? gameIconFor(games, match.wiki) : ""
+}
+
 // parseProfiles decodes profiles.json defensively.
 function parseProfiles(text) {
   if (!text || !String(text).trim()) return []

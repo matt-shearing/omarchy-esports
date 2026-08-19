@@ -1,14 +1,16 @@
 import QtQuick
 import QtQuick.Layouts
 
-// A selectable game tile: short badge, full name, and how busy the scene was
-// when the game was verified. Used by both the setup wizard and settings, so
-// turning a game on looks the same in both places.
+// A selectable game tile: artwork or short badge, full name, and whether the
+// game is on. Used by both the setup wizard and settings, so turning a game on
+// looks the same in both places.
 Rectangle {
     id: chip
 
     property var wiki: null
     property bool enabled_: false
+    // Local artwork path, or "" to fall back to the short text badge.
+    property string icon: ""
 
     signal toggled
 
@@ -35,20 +37,49 @@ Rectangle {
         anchors.rightMargin: 10
         spacing: 9
 
-        // The badge doubles as the visual key used elsewhere in the app.
-        Rectangle {
+        // Artwork where we have it, the short badge otherwise. The text badge
+        // is not merely a placeholder: a game with no curated source, or one
+        // whose artwork has not downloaded yet, stays in this state for good,
+        // so it has to look deliberate rather than broken.
+        Item {
             Layout.preferredWidth: 40
-            Layout.preferredHeight: 24
-            radius: 4
-            color: chip.enabled_ ? Theme.accent : Theme.alpha(Theme.foreground, 0.12)
+            Layout.preferredHeight: 30
 
-            Text {
+            readonly property bool artworkShown: art.status === Image.Ready
+
+            Image {
+                id: art
+                anchors.fill: parent
+                source: chip.icon
+                visible: status === Image.Ready
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+                asynchronous: true
+                // Bound the decode: some publisher icons are 1024px square and
+                // this draws at 40.
+                sourceSize.width: 80
+                sourceSize.height: 80
+                opacity: chip.enabled_ ? 1.0 : 0.55
+                Behavior on opacity { NumberAnimation { duration: 110 } }
+            }
+
+            Rectangle {
                 anchors.centerIn: parent
-                text: chip.wiki ? (chip.wiki.short || "?") : "?"
-                color: chip.enabled_ ? Theme.background : Theme.foreground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontCaption - 1
-                font.bold: true
+                width: 40
+                height: 24
+                radius: 4
+                visible: !parent.artworkShown
+                color: chip.enabled_ ? Theme.accent : Theme.alpha(Theme.foreground, 0.12)
+
+                Text {
+                    anchors.centerIn: parent
+                    text: chip.wiki ? (chip.wiki.short || "?") : "?"
+                    color: chip.enabled_ ? Theme.background : Theme.foreground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption - 1
+                    font.bold: true
+                }
             }
         }
 

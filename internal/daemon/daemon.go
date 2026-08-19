@@ -200,6 +200,7 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	d.fetchTeamProfiles(ctx, &priv)
 	d.fetchMissingLogos(ctx, &priv)
 	d.cacheLogos(ctx, all, &priv)
+	d.cacheGameIcons(ctx)
 
 	priv.Matches = all
 	priv.UpdatedAt = time.Now()
@@ -219,6 +220,9 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	}
 	if err := d.publishProfiles(priv); err != nil {
 		d.logger.Printf("writing team profiles: %v", err)
+	}
+	if err := d.publishGames(); err != nil {
+		d.logger.Printf("writing game catalog: %v", err)
 	}
 	return d.publish(priv, errs)
 }
@@ -963,6 +967,66 @@ func (d *Daemon) publishProfiles(priv store.Private) error {
 		d.logger.Printf("profiles: withheld %d result-bearing field(s)", dropped)
 	}
 	return d.store.SaveProfiles(out)
+}
+
+// maxGameIconDownloads bounds artwork fetches per refresh. These are small,
+// few, and fetched once ever, but a first run with many games enabled should
+// not spend its whole logo budget on them.
+const maxGameIconDownloads = 6
+
+// cacheGameIcons downloads game artwork for enabled games.
+//
+// Only enabled games: the catalog has 37 entries and a user typically watches
+// a handful, so fetching the rest would be traffic nobody asked for.
+func (d *Daemon) cacheGameIcons(ctx context.Context) {
+	if d.logos.BackingOff() {
+		return
+	}
+	ua := d.lp.UserAgent()
+	attempts := 0
+	for _, w := range d.cfg.EnabledWikis() {
+		if attempts >= maxGameIconDownloads {
+			return
+		}
+		url := logosource.GameURLFor(w.Slug)
+		if url == "" || d.logos.Has(url) {
+			continue
+		}
+		attempts++
+		if _, err := d.logos.Fetch(ctx, url, ua); err != nil {
+			if !errors.Is(err, liquipedia.ErrBackoff) {
+				d.logger.Printf("game icon %s: %v", w.Slug, err)
+			}
+			return
+		}
+		d.logger.Printf("game icon %s: cached", w.Slug)
+	}
+}
+
+// publishGames writes the catalog the UI renders its game chips from.
+func (d *Daemon) publishGames() error {
+	catalog := config.Catalog
+	out := make([]store.PublicGame, 0, len(catalog))
+	withArt := 0
+	for _, e := range catalog {
+		g := store.PublicGame{
+			Slug:    e.Slug,
+			Game:    e.Game,
+			Short:   e.Short,
+			Enabled: d.cfg.WikiEnabled(e.Slug),
+		}
+		if url := logosource.GameURLFor(e.Slug); url != "" {
+			if p := d.logos.Resolve(url); p != "" {
+				g.Icon = "file://" + p
+				withArt++
+			}
+		}
+		out = append(out, g)
+	}
+	if withArt > 0 {
+		d.logger.Printf("games: %d of %d with artwork", withArt, len(out))
+	}
+	return d.store.SaveGames(out)
 }
 
 // warnIfOversubscribed points out when the enabled games cannot be fetched

@@ -191,6 +191,36 @@ check("parseState survives junk", () => {
   ok(!Model.parseState("").ok);
 });
 
+// --- game artwork --------------------------------------------------------
+check("gameIconFor resolves artwork and falls back to nothing", () => {
+  const games = [
+    { slug: "dota2", game: "Dota 2", short: "DOTA", icon: "file:///cache/dota.png" },
+    { slug: "counterstrike", game: "Counter-Strike", short: "CS2", icon: "" },
+  ];
+  eq(Model.gameIconFor(games, "dota2"), "file:///cache/dota.png");
+  eq(Model.gameIconFor(games, "DOTA2"), "file:///cache/dota.png", "slug match is case-insensitive:");
+  // A game with no curated source, or artwork not yet downloaded, is normal —
+  // every caller falls back to the short text badge.
+  eq(Model.gameIconFor(games, "counterstrike"), "");
+  eq(Model.gameIconFor(games, "valorant"), "");
+  eq(Model.gameIconFor([], "dota2"), "");
+  eq(Model.gameIconFor(games, ""), "");
+});
+
+check("gameIconForMatch keys off the fixture's wiki", () => {
+  const games = [{ slug: "dota2", icon: "file:///cache/dota.png" }];
+  eq(Model.gameIconForMatch(games, { wiki: "dota2" }), "file:///cache/dota.png");
+  eq(Model.gameIconForMatch(games, { wiki: "valorant" }), "");
+  eq(Model.gameIconForMatch(games, null), "");
+});
+
+check("parseGames survives junk", () => {
+  eq(Model.parseGames("").length, 0);
+  eq(Model.parseGames("{").length, 0);
+  eq(Model.parseGames('{"games":"nope"}').length, 0);
+  eq(Model.parseGames('{"games":[{"slug":"dota2"}]}').length, 1);
+});
+
 // --- team profiles -------------------------------------------------------
 check("profileFor matches on name and game scope", () => {
   const profiles = [

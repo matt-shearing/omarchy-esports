@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Curated game artwork sources, keyed by the catalog's wiki slug.",
+    "",
+    "This file contains URLs, not artwork. It ships with the project; the images",
+    "it points at do not, and are fetched to each user's own machine and cached",
+    "there. A game's logo is the publisher's trademark, so shipping a copy would",
+    "be redistributing it — a link is not.",
+    "",
+    "'terms' records what the source actually states about reuse. 'none stated'",
+    "is the honest answer for most publishers, who provide brand assets without",
+    "saying anything about third-party use. Where guidelines exist they are",
+    "cited. Nothing here asserts a licence that was not found in writing.",
+    "",
+    "Square marks are preferred: these render in a badge of roughly 40px, where",
+    "a wide wordmark is illegible.",
+    "",
+    "A game with no entry falls back to its short text badge, which is why the",
+    "map being incomplete is not a bug."
+  ],
+  "version": 1,
+  "games": {}
+}

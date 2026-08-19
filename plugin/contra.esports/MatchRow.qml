@@ -15,6 +15,8 @@ Rectangle {
     property bool hasCursor: false
     property double nowMs: 0
     property var teams: []
+    // Game catalog, for the artwork badge. Empty just means a text badge.
+    property var games: []
     property bool expanded: false
 
     signal toggleRequested
@@ -141,21 +143,44 @@ Rectangle {
                 // Game and format, dimmer than the tournament above it: useful
                 // orientation when several games share one list, but never
                 // competing with the fixture itself.
-                Text {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: {
-                        if (!row.match) return ""
-                        var bits = []
-                        var badge = Model.gameBadge(row.match)
-                        if (badge) bits.push(badge)
-                        if (Model.bestOfLabel(row.match)) bits.push(Model.bestOfLabel(row.match))
-                        return bits.join(" · ")
+                    spacing: 4
+
+                    Item { Layout.fillWidth: true }
+
+                    // The artwork carries the same 0.4 opacity as the text it
+                    // sits beside: this line is orientation, and must not
+                    // out-shout the fixture above it.
+                    Image {
+                        source: Model.gameIconForMatch(row.games, row.match)
+                        visible: status === Image.Ready
+                        Layout.preferredWidth: Style.font.caption
+                        Layout.preferredHeight: Style.font.caption
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                        mipmap: true
+                        asynchronous: true
+                        sourceSize.width: 24
+                        sourceSize.height: 24
+                        opacity: 0.4
                     }
-                    color: row.fg
-                    opacity: 0.4
-                    horizontalAlignment: Text.AlignRight
-                    font.family: row.bar ? row.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.caption
+
+                    Text {
+                        text: {
+                            if (!row.match) return ""
+                            var bits = []
+                            var badge = Model.gameBadge(row.match)
+                            if (badge) bits.push(badge)
+                            if (Model.bestOfLabel(row.match)) bits.push(Model.bestOfLabel(row.match))
+                            return bits.join(" · ")
+                        }
+                        color: row.fg
+                        opacity: 0.4
+                        horizontalAlignment: Text.AlignRight
+                        font.family: row.bar ? row.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                    }
                 }
             }
 

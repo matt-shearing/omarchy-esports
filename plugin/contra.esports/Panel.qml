@@ -31,6 +31,8 @@ Panel {
 
     // ---- state ----
     property var model: Model.parseState("")
+    // Game catalog with local artwork paths, published by the daemon.
+    property var games: []
     property double nowMs: Date.now()
     property int focusIndex: 0
     property bool cursorActive: false
@@ -84,13 +86,23 @@ Panel {
         onFileChanged: reload()
     }
 
-    // The state file may not exist before the daemon's first run; FileView
-    // cannot watch a missing path, so re-probe until it appears.
+    FileView {
+        id: gamesFile
+        path: root.statePath.replace(/state\.json$/, "games.json")
+        watchChanges: true
+        printErrors: false
+        onLoaded: root.games = Model.parseGames(text())
+        onLoadFailed: root.games = []
+        onFileChanged: reload()
+    }
+
+    // Neither file exists before the daemon's first run; FileView cannot watch
+    // a missing path, so re-probe until they appear.
     Timer {
         interval: 5000
-        running: !root.model.ok
+        running: !root.model.ok || root.games.length === 0
         repeat: true
-        onTriggered: stateFile.reload()
+        onTriggered: { stateFile.reload(); gamesFile.reload() }
     }
 
     // Clock for countdowns. One second while the panel is open so the numbers
@@ -383,6 +395,7 @@ Panel {
                                 match: modelData
                                 bar: root.bar
                                 teams: root.model.teams
+                                games: root.games
                                 darkTheme: root.darkTheme
                                 nowMs: root.nowMs
                                 expanded: root.expandedId === modelData.id

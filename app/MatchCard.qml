@@ -9,6 +9,8 @@ Rectangle {
 
     property var match: null
     property var teams: []
+    // Game catalog, for the artwork badge. Empty just means a text badge.
+    property var games: []
     property double nowMs: 0
 
     signal watch
@@ -84,21 +86,42 @@ Rectangle {
         // Game badge: small and dim, a visual key rather than a label to read.
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: badgeText.implicitWidth + 12
+            Layout.preferredWidth: badgeRow.implicitWidth + 12
             Layout.preferredHeight: 18
             radius: 4
             visible: badgeText.text !== ""
             color: Theme.alpha(Theme.foreground, 0.07)
 
-            Text {
-                id: badgeText
+            RowLayout {
+                id: badgeRow
                 anchors.centerIn: parent
-                text: Model.gameBadge(card.match)
-                color: Theme.muted
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontCaption - 1
-                font.bold: true
-                font.letterSpacing: 0.5
+                spacing: 4
+
+                // Artwork sits beside the short badge rather than replacing
+                // it: at this size a logo alone is decoration, but paired with
+                // the text it is a much faster thing to scan a list for.
+                Image {
+                    source: Model.gameIconFor(card.games, card.match ? card.match.wiki : "")
+                    visible: status === Image.Ready
+                    Layout.preferredWidth: 13
+                    Layout.preferredHeight: 13
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    mipmap: true
+                    asynchronous: true
+                    sourceSize.width: 26
+                    sourceSize.height: 26
+                }
+
+                Text {
+                    id: badgeText
+                    text: Model.gameBadge(card.match)
+                    color: Theme.muted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption - 1
+                    font.bold: true
+                    font.letterSpacing: 0.5
+                }
             }
         }
 

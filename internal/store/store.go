@@ -420,6 +420,33 @@ func (s *Store) SaveProfiles(profiles []TeamProfile) error {
 	}, 0o644)
 }
 
+// PublicGame is one game in the catalog, with its artwork resolved to a local
+// path when we hold it.
+type PublicGame struct {
+	Slug    string `json:"slug"`
+	Game    string `json:"game"`
+	Short   string `json:"short,omitempty"`
+	Enabled bool   `json:"enabled"`
+	// Icon is a file:// URL for artwork already on this machine. Empty means
+	// the UI falls back to the short text badge, which is always available.
+	Icon string `json:"icon,omitempty"`
+}
+
+// GamesPath is the world-readable file the UI reads the game catalog from.
+func (s *Store) GamesPath() string { return filepath.Join(s.dir, "games.json") }
+
+// SaveGames publishes the catalog. Game names and artwork reveal no results,
+// so nothing here is redacted.
+func (s *Store) SaveGames(games []PublicGame) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sort.SliceStable(games, func(i, j int) bool { return games[i].Game < games[j].Game })
+	return writeJSON(s.GamesPath(), map[string]any{
+		"version": CurrentVersion,
+		"games":   games,
+	}, 0o644)
+}
+
 // SetRevealed records an explicit reveal and persists it.
 func (s *Store) SetRevealed(id string, revealed bool) error {
 	p, err := s.LoadPrivate()

@@ -17,6 +17,7 @@ ShellRoot {
     property var model: Model.parseState("")
     property var teamIndex: []
     property var profiles: []
+    property var games: []
     property double nowMs: Date.now()
     property string tab: "upcoming"
     property string busy: ""
@@ -49,6 +50,16 @@ ShellRoot {
         printErrors: false
         onLoaded: app.model = Model.parseState(text())
         onLoadFailed: app.model = Model.parseState("")
+        onFileChanged: reload()
+    }
+
+    FileView {
+        id: gamesFile
+        path: app.stateDir + "/games.json"
+        watchChanges: true
+        printErrors: false
+        onLoaded: app.games = Model.parseGames(text())
+        onLoadFailed: app.games = []
         onFileChanged: reload()
     }
 
@@ -102,9 +113,13 @@ ShellRoot {
     // restarted.
     Timer {
         interval: 4000
-        running: !app.model.ok || app.teamIndex.length === 0 || app.profiles.length === 0
+        running: !app.model.ok || app.teamIndex.length === 0
+            || app.profiles.length === 0 || app.games.length === 0
         repeat: true
-        onTriggered: { stateFile.reload(); teamsFile.reload(); profilesFile.reload() }
+        onTriggered: {
+            stateFile.reload(); teamsFile.reload()
+            profilesFile.reload(); gamesFile.reload()
+        }
     }
 
     Process { id: proc }
@@ -260,6 +275,7 @@ ShellRoot {
             visible: app.config.ok && !app.setupDone
             config: app.config
             teamIndex: app.teamIndex
+            games: app.games
             followed: app.config.ok ? app.config.teams : app.model.teams
             onApply: function (key, value) { app.applySetting(key, value) }
             onApplyWiki: function (slug, on) { app.applyWiki(slug, on) }
@@ -401,6 +417,7 @@ ShellRoot {
                             width: matchList.width
                             match: modelData
                             teams: app.model.teams
+                            games: app.games
                             nowMs: app.nowMs
                             onWatch: app.watch(modelData)
                             onReveal: app.run(["reveal", modelData.id], "revealing…")
@@ -540,6 +557,7 @@ ShellRoot {
                             width: vodList.width
                             match: modelData
                             teams: app.model.teams
+                            games: app.games
                             nowMs: app.nowMs
                             tournamentClickable: true
                             onWatch: app.watch(modelData)
@@ -841,6 +859,7 @@ ShellRoot {
                                 MatchCard {
                                     match: modelData.match
                                     teams: app.model.teams
+                                    games: app.games
                                     nowMs: app.nowMs
                                     onWatch: app.watch(modelData.match)
                                     onReveal: app.run(["reveal", modelData.match.id], "revealing…")
@@ -855,6 +874,7 @@ ShellRoot {
                 SettingsView {
                     config: app.config
                     teamIndex: app.teamIndex
+                    games: app.games
                     onApply: function (key, value) { app.applySetting(key, value) }
                     onApplyWiki: function (slug, on) { app.applyWiki(slug, on) }
                 }
