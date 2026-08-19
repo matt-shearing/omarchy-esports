@@ -24,6 +24,10 @@ Panel {
     readonly property int maxRows: Math.max(3, Number(setting("maxRows", 10)))
     readonly property bool showFinished: setting("showFinished", true) === true
     readonly property bool hideWhenEmpty: setting("hideWhenEmpty", false) === true
+    // A view filter over what this panel draws. Deliberately not the daemon's
+    // own followedOnly key: that one drops non-followed matches from the state
+    // file altogether, which would take them away from the app too.
+    readonly property bool followedOnly: setting("followedOnly", false) === true
 
     // ---- state ----
     property var model: Model.parseState("")
@@ -47,8 +51,17 @@ Panel {
     readonly property var barInfo: Model.barLabel(model.matches, nowMs, showLabel)
     readonly property var groups: Model.sections(model.matches, nowMs, {
         showFinished: root.showFinished,
-        followedOnly: false
+        followedOnly: root.followedOnly
     })
+
+    // True when the followed-only filter is the reason the list is empty, so
+    // the empty state can say "the filter is on" rather than "nothing on".
+    // Short-circuits, so the second grouping pass only runs on an empty list.
+    readonly property bool filteredToNothing: followedOnly && groups.length === 0 &&
+        Model.sections(model.matches, nowMs, {
+            showFinished: root.showFinished,
+            followedOnly: false
+        }).length > 0
 
     // ModuleSlot sizes a bar widget from these. An Item does not take its
     // size from its children, so omitting them collapses the widget to zero
@@ -125,6 +138,24 @@ Panel {
 
     function toggleExpanded(id) {
         root.expandedId = (root.expandedId === id) ? "" : id
+    }
+
+    // Persisted as a per-widget setting, so the filter survives a shell
+    // restart the same way the clock widget remembers its cycled format.
+    function toggleFollowedOnly() {
+        var entry = { id: root.moduleName }
+        for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+        entry["followedOnly"] = !root.followedOnly
+
+        // Applied locally first so the list filters on the click itself; the
+        // shell.json write comes back through the bar as the same value.
+        root.settings = entry
+        if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+            root.bar.shell.updateEntryInline(root.moduleName, entry)
+
+        // The list just changed length under the keyboard cursor.
+        root.focusIndex = 0
+        root.expandedId = ""
     }
 
     function activate(m) {
@@ -244,6 +275,23 @@ Panel {
                         font.pixelSize: Style.font.caption
                     }
 
+                    // Constant label so the header does not reflow as the
+                    // filter goes on and off; `active` carries the state.
+                    Button {
+                        text: "󰓎 Mine"
+                        tooltipText: root.followedOnly
+                            ? "Showing only matches with a team you follow"
+                            : "Show only matches with a team you follow"
+                        fontSize: Style.font.caption
+                        foreground: root.bar ? root.bar.foreground : Color.popups.text
+                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        horizontalPadding: Style.spacing.controlPaddingX
+                        verticalPadding: Style.spacing.controlPaddingY
+                        bordered: true
+                        active: root.followedOnly
+                        onClicked: root.toggleFollowedOnly()
+                    }
+
                     Button {
                         text: "󰏋 Open app"
                         fontSize: Style.font.caption
@@ -273,9 +321,13 @@ Panel {
                 Text {
                     visible: root.model.ok && root.groups.length === 0
                     Layout.fillWidth: true
-                    text: root.model.teams.length === 0
-                        ? "No matches scheduled.\nFollow a team: omarchy-esports teams add \"Team Spirit\""
-                        : "No matches scheduled for your teams."
+                    text: {
+                        if (root.filteredToNothing)
+                            return "No matches for your teams.\n󰓎 Mine is on — turn it off to see every match."
+                        if (root.model.teams.length === 0)
+                            return "No matches scheduled.\nFollow a team: omarchy-esports teams add \"Team Spirit\""
+                        return "No matches scheduled for your teams."
+                    }
                     color: root.bar ? root.bar.foreground : Color.popups.text
                     opacity: 0.6
                     wrapMode: Text.WordWrap

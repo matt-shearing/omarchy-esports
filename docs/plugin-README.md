@@ -15,8 +15,9 @@ spoiler blackout that is enforced by the daemon rather than by the UI.
 - **Catch-up masking.** If you are behind on a team's matches, their later
   fixtures have the *opponent* withheld too, because knowing who they play next
   tells you they won.
-- Covers **Dota 2**, **Counter-Strike** and **StarCraft II**, plus any other
-  Liquipedia wiki you add.
+- **Filter to your teams** with the ★ Mine toggle in the panel header.
+- Covers **Dota 2**, **Counter-Strike** and **StarCraft II** out of the box,
+  with 19 games verified and one command away.
 
 ## Requires the daemon
 

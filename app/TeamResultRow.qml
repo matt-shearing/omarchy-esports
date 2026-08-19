@@ -62,6 +62,9 @@ Rectangle {
                     var bits = []
                     if (row.team.short && row.team.short !== row.team.name) bits.push(row.team.short)
                     if (row.team.game) bits.push(row.team.game)
+                    // Distinguish a team with fixtures from a directory entry,
+                    // so an empty logo reads as "not playing" not "broken".
+                    if (row.team.playing) bits.push("playing")
                     return bits.join(" · ")
                 }
                 color: Theme.muted

@@ -60,6 +60,8 @@ func main() {
 		err = cmdWatched(args, true)
 	case "unwatch":
 		err = cmdWatched(args, false)
+	case "games":
+		err = cmdGames(args)
 	case "search":
 		err = cmdSearch(args)
 	case "team":
@@ -104,6 +106,8 @@ commands:
   hide <id>        re-blind a revealed match
   watched <id>     mark a match watched, advancing the catch-up queue
   unwatch <id>     mark it unwatched again
+  games            list known games, and turn them on or off
+                     list | on <slug>... | off <slug>...
   search <query>   fuzzy-search the team index
                      --json  --game <slug>
   team <name>      show a team's upcoming matches
@@ -547,6 +551,76 @@ func loadTeamIndex(st *store.Store) ([]store.TeamEntry, error) {
 	return idx.Teams, nil
 }
 
+// cmdGames lists and toggles the games polled.
+func cmdGames(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	action := "list"
+	if len(args) > 0 {
+		action = args[0]
+	}
+
+	if action == "list" {
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "GAME\tSLUG\tTICKER PAGE\tSTATE")
+		configured := map[string]bool{}
+		for _, wiki := range cfg.Wikis {
+			configured[wiki.Slug] = true
+			state := "off"
+			if wiki.Enabled {
+				state = "on"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", wiki.Game, wiki.Slug, wiki.TickerPage, state)
+		}
+		// Catalog entries the user's config predates.
+		for _, e := range config.Catalog {
+			if !configured[e.Slug] {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Game, e.Slug, e.TickerPage, "available")
+			}
+		}
+		if err := w.Flush(); err != nil {
+			return err
+		}
+		fmt.Println("\nEach enabled game costs one page parse per refresh, and Liquipedia")
+		fmt.Println("allows one every 30 seconds — so more games means slower refreshes.")
+		return nil
+	}
+
+	slugs := args[1:]
+	if len(slugs) == 0 {
+		return fmt.Errorf("%s needs at least one game slug (see `omarchy-esports games list`)", action)
+	}
+	on := action == "on"
+	if action != "on" && action != "off" {
+		return fmt.Errorf("unknown games action %q (want list, on or off)", action)
+	}
+
+	for _, slug := range slugs {
+		slug = strings.ToLower(strings.TrimSpace(slug))
+		found := false
+		for i := range cfg.Wikis {
+			if strings.EqualFold(cfg.Wikis[i].Slug, slug) {
+				cfg.Wikis[i].Enabled = on
+				found = true
+			}
+		}
+		if !found {
+			// Adopt it from the catalog rather than making the user hand-write
+			// a wiki entry.
+			e, ok := config.CatalogFor(slug)
+			if !ok {
+				return fmt.Errorf("unknown game %q — `omarchy-esports games list` shows what is available", slug)
+			}
+			cfg.Wikis = append(cfg.Wikis, e.Wiki(on))
+		}
+		fmt.Printf("%s %s\n", slug, map[bool]string{true: "enabled", false: "disabled"}[on])
+	}
+	return config.Save(cfg)
+}
+
 func cmdSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
@@ -580,9 +654,16 @@ func cmdSearch(args []string) error {
 		if gameFilter != "" && !strings.EqualFold(t.Wiki, gameFilter) {
 			continue
 		}
-		if s := fuzzy.Best(query, t.Name, t.Short); s != fuzzy.NoMatch {
-			hits = append(hits, scored{TeamEntry: t, Score: s, Followed: cfg.Follows(t.Name, t.Wiki)})
+		sc := fuzzy.Best(query, t.Name, t.Short)
+		if sc == fuzzy.NoMatch {
+			continue
 		}
+		// A team with a fixture in the current window is far more likely to be
+		// the one being searched for than a dormant directory entry.
+		if t.Playing {
+			sc += 50
+		}
+		hits = append(hits, scored{TeamEntry: t, Score: sc, Followed: cfg.Follows(t.Name, t.Wiki)})
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 	if len(hits) > *limit {
@@ -599,13 +680,17 @@ func cmdSearch(args []string) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "TEAM\tSHORT\tGAME\tWIKI\tFOLLOWED")
+	fmt.Fprintln(w, "TEAM\tSHORT\tGAME\tSTATUS\tFOLLOWED")
 	for _, h := range hits {
 		star := ""
 		if h.Followed {
 			star = "*"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", h.Name, h.Short, h.Game, h.Wiki, star)
+		status := ""
+		if h.Playing {
+			status = "playing"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", h.Name, h.Short, h.Game, status, star)
 	}
 	if err := w.Flush(); err != nil {
 		return err

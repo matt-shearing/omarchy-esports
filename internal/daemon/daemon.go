@@ -87,6 +87,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	interval := time.Duration(d.cfg.PollInterval)
 	d.logger.Printf("starting: %d wiki(s), poll every %s, spoilers=%s",
 		len(d.cfg.EnabledWikis()), interval, d.cfg.Spoilers)
+	d.warnIfOversubscribed(interval)
 
 	// Run the first refresh concurrently. It is slow by design — Liquipedia
 	// allows one parse per 30 seconds, so three wikis take a couple of minutes
@@ -171,6 +172,8 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	}
 
 	d.indexTeams(all, &priv)
+	d.sweepDirectories(ctx, &priv)
+	d.fetchMissingLogos(ctx, &priv)
 
 	priv.Matches = all
 	priv.UpdatedAt = time.Now()
@@ -227,6 +230,15 @@ func (d *Daemon) indexTeams(ms []match.Match, priv *store.Private) {
 		}
 	}
 	now := time.Now()
+	// Playing is recomputed from the current window every refresh, so a team
+	// that stops appearing in fixtures falls back to being directory-only
+	// rather than staying marked active forever.
+	for k, e := range priv.Teams {
+		if e.Playing {
+			e.Playing = false
+			priv.Teams[k] = e
+		}
+	}
 	for _, m := range ms {
 		for _, o := range m.Opponents {
 			name := strings.TrimSpace(o.Name)
@@ -254,6 +266,8 @@ func (d *Daemon) indexTeams(ms []match.Match, priv *store.Private) {
 				entry.Logo.Dark = o.Logo.Dark
 			}
 			entry.LastSeen = now
+			entry.Source = "ticker"
+			entry.Playing = true
 			priv.Teams[key] = entry
 		}
 	}
@@ -268,6 +282,114 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// sweepDirectories enumerates each enabled wiki's team category so the search
+// index covers orgs that have no fixture right now.
+//
+// Without this the index only knows teams seen in the fetched window, which
+// makes an org between events invisible for that game: Team Liquid has Dota
+// fixtures today and none in Counter-Strike, so they simply could not be
+// followed for CS.
+//
+// Every wiki that is due is swept in the same pass. Enumerating a category is
+// an `action=query` call, rate-limited at one per 2 seconds rather than the
+// one per 30 seconds a page parse costs, so a wiki is only a few seconds of
+// budget. Spreading them across refreshes would leave a new user with a
+// half-populated team list for the best part of an hour for no saving worth
+// having.
+func (d *Daemon) sweepDirectories(ctx context.Context, priv *store.Private) {
+	for _, w := range d.cfg.EnabledWikis() {
+		last, ok := priv.DirectorySweeps[w.Slug]
+		if ok && time.Since(last) < liquipedia.DirectoryTTL {
+			continue
+		}
+
+		teams, err := d.lp.ListTeams(ctx, w.Slug, w.TeamCategory)
+		if err != nil {
+			d.logger.Printf("team directory %s: %v", w.Slug, err)
+			continue
+		}
+
+		added := 0
+		for _, t := range teams {
+			key := w.Slug + "/" + strings.ToLower(t.Name)
+			entry, exists := priv.Teams[key]
+			if !exists {
+				entry = store.TeamEntry{
+					Key:    key,
+					Name:   t.Name,
+					Page:   t.Page,
+					Wiki:   w.Slug,
+					Game:   w.Game,
+					Source: "directory",
+				}
+				added++
+			}
+			// Never downgrade an entry the ticker gave us: that one has
+			// artwork and a verified short name.
+			if entry.Page == "" {
+				entry.Page = t.Page
+			}
+			if entry.Game == "" {
+				entry.Game = w.Game
+			}
+			priv.Teams[key] = entry
+		}
+		priv.DirectorySweeps[w.Slug] = time.Now()
+		d.logger.Printf("team directory %s: %d teams (%d new)", w.Slug, len(teams), added)
+	}
+}
+
+// maxLogoFetches bounds how many team logos one refresh may fetch.
+const maxLogoFetches = 6
+
+// fetchMissingLogos fills in artwork for followed teams that have none.
+//
+// Logos normally arrive with a fixture, so a team known only from the wiki's
+// team category has none — which is most of the index. Fetching every one
+// would be thousands of rate-limited calls, so this only does it for teams the
+// user actually follows, a few per refresh, and never repeats a lookup that
+// came back empty.
+func (d *Daemon) fetchMissingLogos(ctx context.Context, priv *store.Private) {
+	fetched := 0
+	for _, f := range d.cfg.Teams {
+		if fetched >= maxLogoFetches {
+			return
+		}
+		// An unscoped follow covers every game the org plays.
+		wikis := []string{f.Wiki}
+		if f.Wiki == "" {
+			wikis = nil
+			for _, w := range d.cfg.EnabledWikis() {
+				wikis = append(wikis, w.Slug)
+			}
+		}
+		for _, wiki := range wikis {
+			if fetched >= maxLogoFetches {
+				return
+			}
+			key := wiki + "/" + strings.ToLower(f.Name)
+			entry, ok := priv.Teams[key]
+			if !ok || entry.Logo.Light != "" || entry.Logo.Dark != "" || entry.LogoChecked {
+				continue
+			}
+			logo, err := d.lp.FetchLogo(ctx, wiki, entry.Name)
+			if err != nil {
+				d.logger.Printf("logo %s/%s: %v", wiki, entry.Name, err)
+				continue
+			}
+			fetched++
+			// Record the attempt either way: a team with no infobox artwork
+			// should not be re-queried on every refresh forever.
+			entry.LogoChecked = true
+			if logo.Light != "" || logo.Dark != "" {
+				entry.Logo = logo
+				d.logger.Printf("logo %s/%s: found", wiki, entry.Name)
+			}
+			priv.Teams[key] = entry
+		}
+	}
+}
+
 // publishTeams writes the searchable index.
 func (d *Daemon) publishTeams(priv store.Private) error {
 	out := make([]store.TeamEntry, 0, len(priv.Teams))
@@ -275,6 +397,33 @@ func (d *Daemon) publishTeams(priv store.Private) error {
 		out = append(out, t)
 	}
 	return d.store.SaveTeams(out)
+}
+
+// warnIfOversubscribed points out when the enabled games cannot be fetched
+// inside the poll interval.
+//
+// Liquipedia allows one page parse every 30 seconds, so each enabled game
+// costs a 30-second slot, as does each tournament page fetched for stream
+// links. Turning on a dozen games quietly turns a 15-minute poll into a
+// permanent fetch loop, which is both rude to Liquipedia and confusing to
+// diagnose from the outside — so say so plainly at startup.
+func (d *Daemon) warnIfOversubscribed(interval time.Duration) {
+	games := len(d.cfg.EnabledWikis())
+	if games == 0 {
+		d.logger.Print("warning: no games enabled — `omarchy-esports games on <slug>`")
+		return
+	}
+	// Each ticker is one parse; tournament enrichment adds up to its own cap.
+	worst := time.Duration(games+d.maxTournamentFetches) * 30 * time.Second
+	if worst <= interval {
+		return
+	}
+	suggested := (worst * 2).Round(time.Minute)
+	d.logger.Printf(
+		"warning: %d game(s) need up to %s per refresh but the poll interval is %s; "+
+			"refreshes will overlap. Raise it (`omarchy-esports config set pollInterval %s`) "+
+			"or disable a game (`omarchy-esports games off <slug>`)",
+		games, worst.Round(time.Second), interval, suggested)
 }
 
 // reloadConfigIfChanged picks up edits to the config file.

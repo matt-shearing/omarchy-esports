@@ -415,6 +415,9 @@ function searchTeams(index, query, opts) {
     if (wiki && String(t.wiki || "").toLowerCase() !== String(wiki).toLowerCase()) continue
     var score = Math.max(fuzzyScore(q, t.name), fuzzyScore(q, t.short || ""))
     if (score === NO_MATCH) continue
+    // A team with a fixture in the current window is far more likely to be the
+    // one being searched for than a dormant directory entry.
+    if (t.playing) score += 50
     hits.push({ team: t, score: score })
   }
   hits.sort(function (a, b) {

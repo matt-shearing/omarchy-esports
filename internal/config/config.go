@@ -36,6 +36,9 @@ type Wiki struct {
 	TickerPage string `json:"tickerPage"`
 	// Enabled allows keeping a wiki configured but dormant.
 	Enabled bool `json:"enabled"`
+	// TeamCategory overrides the category enumerated to build the team
+	// directory. Empty means "Teams", which is what every wiki checked uses.
+	TeamCategory string `json:"teamCategory,omitempty"`
 }
 
 // Notifications selects which events raise a desktop notification.
@@ -180,14 +183,8 @@ const MinPollInterval = 5 * time.Minute
 // Default returns the shipped configuration.
 func Default() Config {
 	return Config{
-		Teams: []Follow{},
-		Wikis: []Wiki{
-			{Slug: "dota2", Game: "Dota 2", TickerPage: "Liquipedia:Matches", Enabled: true},
-			{Slug: "counterstrike", Game: "Counter-Strike", TickerPage: "Liquipedia:Matches", Enabled: true},
-			// starcraft2's Liquipedia:Matches is a stale archive (verified: it
-			// returns matches from 2024-2025). Its live ticker is on Main_Page.
-			{Slug: "starcraft2", Game: "StarCraft II", TickerPage: "Main_Page", Enabled: true},
-		},
+		Teams:    []Follow{},
+		Wikis:    defaultWikis(),
 		Spoilers: SpoilerStrict,
 		CatchUp: CatchUp{
 			Enabled: true,
@@ -210,6 +207,18 @@ func Default() Config {
 			MaxAge:  Duration(7 * 24 * time.Hour),
 		},
 	}
+}
+
+// defaultWikis enables the games shipped on by default and offers the rest of
+// the catalog pre-configured but dormant, so turning one on is a toggle rather
+// than a research exercise.
+func defaultWikis() []Wiki {
+	on := map[string]bool{"dota2": true, "counterstrike": true, "starcraft2": true}
+	out := make([]Wiki, 0, len(Catalog))
+	for _, e := range Catalog {
+		out = append(out, e.Wiki(on[e.Slug]))
+	}
+	return out
 }
 
 // Dir returns the configuration directory, honouring XDG.

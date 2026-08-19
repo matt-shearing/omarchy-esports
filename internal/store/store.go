@@ -68,6 +68,9 @@ type Private struct {
 	// the app's follow-list search without extra API calls. It is kept across
 	// refreshes so it grows into a useful directory over time.
 	Teams map[string]TeamEntry `json:"teams"`
+	// DirectorySweeps records when each wiki's team directory was last
+	// enumerated, so a sweep is not repeated on every refresh.
+	DirectorySweeps map[string]time.Time `json:"directorySweeps"`
 	// TournamentStreams caches broadcast channels discovered from tournament
 	// pages, keyed by tournament page path. These are expensive to fetch
 	// (one rate-limited parse each) and change rarely.
@@ -91,6 +94,16 @@ type TeamEntry struct {
 	Wiki     string     `json:"wiki,omitempty"`
 	Game     string     `json:"game,omitempty"`
 	LastSeen time.Time  `json:"lastSeen"`
+	// Source records how we learned about this team: "ticker" means it was
+	// seen in a fixture and therefore carries artwork; "directory" means it
+	// came from the wiki's team category and may have no logo yet.
+	Source string `json:"source,omitempty"`
+	// Playing is true when the team has a fixture in the current window, which
+	// lets search rank active teams above dormant ones.
+	Playing bool `json:"playing,omitempty"`
+	// LogoChecked records that the team's page was inspected for artwork, so a
+	// team whose infobox has none is not re-queried every refresh.
+	LogoChecked bool `json:"logoChecked,omitempty"`
 }
 
 // TournamentInfo is the cached result of scraping a tournament page.
@@ -158,6 +171,7 @@ func (s *Store) LoadPrivate() (Private, error) {
 		Watched:           map[string]bool{},
 		Notified:          map[string]time.Time{},
 		Teams:             map[string]TeamEntry{},
+		DirectorySweeps:   map[string]time.Time{},
 		TournamentStreams: map[string]TournamentInfo{},
 	}
 	data, err := os.ReadFile(s.PrivatePath())
@@ -176,6 +190,7 @@ func (s *Store) LoadPrivate() (Private, error) {
 			Watched:           map[string]bool{},
 			Notified:          map[string]time.Time{},
 			Teams:             map[string]TeamEntry{},
+			DirectorySweeps:   map[string]time.Time{},
 			TournamentStreams: map[string]TournamentInfo{},
 		}, nil
 	}
@@ -187,6 +202,9 @@ func (s *Store) LoadPrivate() (Private, error) {
 	}
 	if p.Teams == nil {
 		p.Teams = map[string]TeamEntry{}
+	}
+	if p.DirectorySweeps == nil {
+		p.DirectorySweeps = map[string]time.Time{}
 	}
 	if p.Notified == nil {
 		p.Notified = map[string]time.Time{}

@@ -4,8 +4,10 @@ Spoiler-free esports schedule for [Omarchy](https://omarchy.org): a bar widget,
 a desktop app, and a daemon that tracks upcoming matches, ties them to live
 streams, and finds VODs afterwards — without telling you who won.
 
-Covers **Dota 2**, **Counter-Strike** and **StarCraft II** out of the box, and
-any other Liquipedia wiki you add.
+Covers **Dota 2**, **Counter-Strike** and **StarCraft II** out of the box, with
+**19 games** verified and one command away — League of Legends, VALORANT,
+Rocket League, Overwatch, Apex, PUBG, Call of Duty, Deadlock, Marvel Rivals and
+more.
 
 ---
 
@@ -231,15 +233,33 @@ team's logo and game, with filter chips for each game. The index is built from
 every team seen in a ticker, so it costs no extra API calls, works offline, and
 naturally covers the teams that are actually competing.
 
+The index has two sources. Teams seen in a fetched fixture arrive with their
+artwork and short name and are marked **playing**; the rest come from each
+wiki's `Category:Teams`, which lists every team page on that wiki — around
+2,900 teams across the three default games. Without that second source the
+index only knew teams with a fixture in the current window, so an org between
+events was invisible: Team Liquid has Dota fixtures today and none in
+Counter-Strike, and could not be followed for CS at all.
+
+Enumerating a category is an `action=query` call, rate-limited at one per two
+seconds rather than the one per thirty seconds a page parse costs, so a full
+sweep is a few seconds per wiki and is repeated weekly.
+
 **Orgs are indexed per game, not per name.** GamerLegion, NAVI, Team Spirit,
 Team Falcons and Aurora Gaming all field rosters in more than one wiki, so each
 appears once per game with its own artwork and its own follow state:
 
 ```bash
+omarchy-esports search "team liquid"
+# TEAM         SHORT   GAME            STATUS   FOLLOWED
+# Team Liquid  Liquid  Dota 2          playing  *
+# Team Liquid          Counter-Strike
+# Team Liquid          StarCraft II
+
 omarchy-esports search gamer
-# TEAM         SHORT  GAME            WIKI           FOLLOWED
-# GamerLegion  GL     Counter-Strike  counterstrike
-# GamerLegion  GL     Dota 2          dota2          *
+# TEAM         SHORT  GAME            STATUS   FOLLOWED
+# GamerLegion  GL     Counter-Strike
+# GamerLegion  GL     Dota 2          playing  *
 
 omarchy-esports teams add "GamerLegion" --game dota2   # their Dota roster only
 omarchy-esports teams add "Team Spirit"                # every game
@@ -256,7 +276,12 @@ side by side:
 
 Ranking prefers exact matches, then prefixes, then word prefixes, then
 substrings, and finally subsequences, so `spir` finds Team Spirit before Team
-Spirit Academy, and `navi` finds Natus Vincere by its abbreviation.
+Spirit Academy, and `navi` finds Natus Vincere by its abbreviation. A team with
+a current fixture outranks a dormant one, which is why the Dota row comes first
+above.
+
+Teams known only from the directory have no logo until they next play — the
+ticker is where artwork comes from.
 
 ## Settings
 
@@ -290,6 +315,7 @@ The daemon notices config changes within about 30 seconds — no restart.
     { "slug": "dota2",         "game": "Dota 2",        "tickerPage": "Liquipedia:Matches", "enabled": true },
     { "slug": "counterstrike", "game": "Counter-Strike","tickerPage": "Liquipedia:Matches", "enabled": true },
     { "slug": "starcraft2",    "game": "StarCraft II",  "tickerPage": "Main_Page",          "enabled": true }
+    // ...plus the rest of the catalog, disabled. `games on <slug>` flips one.
   ],
   "spoilers": "strict",        // strict | balanced | off
   "catchUp": {
@@ -309,8 +335,37 @@ The daemon notices config changes within about 30 seconds — no restart.
 }
 ```
 
-Adding a wiki is just another entry — `valorant`, `leagueoflegends`,
-`rocketleague`, `apexlegends` and friends all use `Liquipedia:Matches`.
+## Games
+
+```bash
+omarchy-esports games list
+omarchy-esports games on valorant
+omarchy-esports games off starcraft2
+```
+
+The catalog holds 19 wikis, each verified against the live API: the slug
+resolves, the ticker page exists, and parsing it returns fixtures in the format
+this tool reads.
+
+Existence alone does not qualify a game. StarCraft II has a
+`Liquipedia:Upcoming_and_ongoing_matches` page that looks exactly right and
+serves matches from 2024-25 — which is why its entry points at `Main_Page`,
+as does StarCraft: Brood War's. Games whose ticker could not be confirmed are
+left out with the reason recorded in `internal/config/catalog.go`: Smash and
+Age of Empires have no ticker markup, Formula 1 uses a widget this parser does
+not read, and `streetfighter` and `sixsiege` are not Liquipedia slugs at all.
+A wrong entry is worse than a missing one — it adds a game that silently shows
+nothing.
+
+Two entries (Rainbow Six, EA Sports FC) parsed correctly but held only finished
+matches when checked; their scenes were between events, and the catalog records
+the fixture count seen at verification so a quiet game is distinguishable from
+a broken one.
+
+**Each enabled game costs a 30-second parse slot per refresh**, as does each
+tournament page fetched for stream links. The daemon warns at startup when the
+enabled games cannot be fetched inside the poll interval, and suggests either a
+longer interval or one fewer game.
 
 > StarCraft II is the odd one out: its `Liquipedia:Matches` page is a stale
 > archive that still serves matches from 2024–25, so its ticker is read from
@@ -334,6 +389,7 @@ internal/youtube/        keyless RSS VOD discovery and match association
 internal/spoiler/        redaction engine and leak detection
 internal/store/          the two-file public/private state split
 internal/fuzzy/          team-search ranking (mirrored in shared/Model.js)
+internal/liquipedia/directory.go   per-wiki team catalogue enumeration
 internal/daemon/         polling, enrichment, notifications
 internal/config/         user configuration
 shared/Model.js          formatting logic shared by widget and app
