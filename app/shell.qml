@@ -91,20 +91,42 @@ ShellRoot {
 
     Process { id: proc }
 
+    // Commands used to be dropped whenever one was already in flight, so a
+    // second click within the same second silently did nothing. Queue instead.
+    property var pending: []
+
     function run(args, label) {
-        if (proc.running) return
+        if (proc.running) {
+            var q = app.pending.slice()
+            q.push({ args: args, label: label || "" })
+            app.pending = q
+            return
+        }
         app.busy = label || ""
         proc.command = ["omarchy-esports"].concat(args)
+        proc.running = true
+    }
+
+    function runNext() {
+        if (app.pending.length === 0) {
+            app.busy = ""
+            return
+        }
+        var q = app.pending.slice()
+        var next = q.shift()
+        app.pending = q
+        app.busy = next.label
+        proc.command = ["omarchy-esports"].concat(next.args)
         proc.running = true
     }
 
     Connections {
         target: proc
         function onExited() {
-            app.busy = ""
+            configFile.reload()
             stateFile.reload()
             teamsFile.reload()
-            configFile.reload()
+            app.runNext()
         }
     }
 
@@ -143,8 +165,11 @@ ShellRoot {
     // "followed in any game?".
     function isFollowed(name, wiki) {
         var n = String(name || "").toLowerCase().trim()
-        for (var i = 0; i < app.model.teams.length; i++) {
-            var t = app.model.teams[i]
+        // config.teams, not model.teams: the CLI writes the config file
+        // synchronously, while the daemon's published state lags by a tick.
+        var list = app.config.ok ? app.config.teams : app.model.teams
+        for (var i = 0; i < list.length; i++) {
+            var t = list[i]
             var tn = String((t && t.name !== undefined) ? t.name : t).toLowerCase().trim()
             if (tn !== n) continue
             var scope = (t && t.wiki) ? String(t.wiki).toLowerCase() : ""
@@ -210,7 +235,7 @@ ShellRoot {
             visible: app.config.ok && !app.setupDone
             config: app.config
             teamIndex: app.teamIndex
-            followed: app.model.teams
+            followed: app.config.ok ? app.config.teams : app.model.teams
             onApply: function (key, value) { app.applySetting(key, value) }
             onApplyWiki: function (slug, on) { app.applyWiki(slug, on) }
             onFollowTeam: function (name, wiki) { app.toggleFollow(name, wiki) }

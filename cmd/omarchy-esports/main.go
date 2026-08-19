@@ -416,12 +416,23 @@ func cmdTeams(args []string) error {
 		return fmt.Errorf("%s needs at least one team name", action)
 	}
 	wiki := strings.ToLower(strings.TrimSpace(*game))
-	if wiki != "" && !cfg.WikiEnabled(wiki) {
-		var slugs []string
-		for _, w := range cfg.Wikis {
-			slugs = append(slugs, w.Slug)
+	if wiki != "" {
+		// Following a team in a game that is not currently polled is
+		// legitimate: search spans every game, and enabling the game later
+		// should not require re-adding the team. Only reject a slug we have
+		// never heard of.
+		if !cfg.KnownWiki(wiki) {
+			var slugs []string
+			for _, w := range cfg.Wikis {
+				slugs = append(slugs, w.Slug)
+			}
+			return fmt.Errorf("unknown game %q (known: %s)", wiki, strings.Join(slugs, ", "))
 		}
-		return fmt.Errorf("unknown or disabled wiki %q (configured: %s)", wiki, strings.Join(slugs, ", "))
+		if action == "add" && !cfg.WikiEnabled(wiki) {
+			fmt.Fprintf(os.Stderr,
+				"note: %s is not currently polled — enable it to see fixtures: omarchy-esports games on %s\n",
+				wiki, wiki)
+		}
 	}
 
 	switch action {

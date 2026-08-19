@@ -124,6 +124,52 @@ function preferredStream(match) {
   return twitchEN || anyEN || anyTwitch || streams[0]
 }
 
+// initialsFor builds a monogram for a team with no artwork.
+//
+// Most of the index comes from each wiki's team category rather than from a
+// fixture, so the majority of teams have no logo at all — and artwork can also
+// be temporarily unavailable. A blank square reads as broken; two letters read
+// as deliberate.
+function initialsFor(nameOrTeam) {
+  var name = "", short = ""
+  if (typeof nameOrTeam === "string") {
+    name = nameOrTeam
+  } else if (nameOrTeam) {
+    name = nameOrTeam.name || ""
+    short = nameOrTeam.short || ""
+  }
+  name = String(name).trim()
+  short = String(short).trim()
+
+  // The ticker abbreviation is the team's own tag, so it beats anything
+  // derived: "TSpirit", "NAVI", "G2". Only teams known from a wiki category
+  // rather than a fixture lack one.
+  if (short) return short.substring(0, 4).toUpperCase()
+  if (!name) return "?"
+
+  var words = name.split(/[\s._-]+/).filter(Boolean)
+  if (words.length === 0) return name.substring(0, 2).toUpperCase()
+  if (words.length === 1) return words[0].substring(0, 4).toUpperCase()
+
+  // A first word carrying a digit is already the tag — "G2 Esports" is G2,
+  // not GE.
+  if (/[0-9]/.test(words[0])) return words[0].substring(0, 4).toUpperCase()
+
+  // Otherwise the initials of the first two words, filler included: "Team
+  // Liquid" is TL, which is how the org is actually written.
+  return (words[0][0] + words[1][0]).toUpperCase()
+}
+
+// monogramHue derives a stable colour from a name, so a team keeps the same
+// tint everywhere it appears.
+function monogramHue(nameOrTeam) {
+  var name = (typeof nameOrTeam === "string") ? nameOrTeam
+    : (nameOrTeam ? (nameOrTeam.name || nameOrTeam.short || "") : "")
+  var h = 0
+  for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360
+  return h
+}
+
 // logoFor picks the artwork variant matching the active theme.
 //
 // The daemon rewrites these to file:// paths once it has cached the artwork
@@ -458,7 +504,12 @@ function searchTeams(index, query, opts) {
   }
   hits.sort(function (a, b) {
     if (b.score !== a.score) return b.score - a.score
-    return String(a.team.name).localeCompare(String(b.team.name))
+    var byName = String(a.team.name).localeCompare(String(b.team.name))
+    if (byName !== 0) return byName
+    // An org fields rosters in several games, so name and score alone tie and
+    // leave the order undefined — the two rows could then swap between
+    // refreshes and a second click would land on a different game.
+    return String(a.team.wiki || "").localeCompare(String(b.team.wiki || ""))
   })
   return hits.slice(0, limit).map(function (h) { return h.team })
 }
@@ -468,7 +519,7 @@ function searchTeams(index, query, opts) {
 // one place.
 function parseConfig(text) {
   var empty = {
-    ok: false, setupComplete: true, spoilers: "strict", followedOnly: false, hideTBD: true,
+    ok: false, setupComplete: true, teams: [], spoilers: "strict", followedOnly: false, hideTBD: true,
     minTier: 0, hideMinorEvents: false,
     catchUp: { enabled: true, window: "48h0m0s" },
     wikis: [], notifications: {}, pollInterval: "15m0s", contactEmail: ""
@@ -481,6 +532,13 @@ function parseConfig(text) {
       // Default to complete when absent, so an existing install never gets
       // the wizard sprung on it by an upgrade.
       setupComplete: d.setupComplete !== false,
+      // Read the follow list from here rather than the daemon's published
+      // state: the CLI writes this file immediately, whereas state.json only
+      // catches up on the daemon's next tick, which made following a team look
+      // like it had failed for ~20 seconds.
+      teams: Array.isArray(d.teams) ? d.teams.map(function (t) {
+        return (t && t.name !== undefined) ? t : { name: t }
+      }) : [],
       minTier: d.minTier || 0,
       hideMinorEvents: d.hideMinorEvents === true,
       spoilers: d.spoilers || "strict",

@@ -2,7 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import "Model.js" as Model
 
-// Team logo plus name, sized for the app's cards.
+// Team logo and name. Falls back to a monogram, because most of the index
+// comes from wiki team categories rather than fixtures and so has no artwork —
+// and remote artwork can be temporarily unavailable besides.
 RowLayout {
     id: badge
 
@@ -13,37 +15,47 @@ RowLayout {
     signal clicked(string name)
 
     readonly property bool hidden: Model.isHiddenOpponent(opponent)
+    readonly property string logoSource: hidden ? "" : Model.logoFor(opponent, Theme.dark)
 
     spacing: 8
     layoutDirection: mirrored ? Qt.RightToLeft : Qt.LeftToRight
 
-    Image {
+    Item {
         Layout.preferredWidth: 26
         Layout.preferredHeight: 26
-        fillMode: Image.PreserveAspectFit
-        asynchronous: true
-        cache: true
-        sourceSize.width: 52
-        sourceSize.height: 52
-        source: badge.hidden ? "" : Model.logoFor(badge.opponent, Theme.dark)
-        visible: !badge.hidden && status === Image.Ready
-    }
 
-    // A withheld side reads as deliberately hidden, not as missing data.
-    Rectangle {
-        visible: badge.hidden
-        Layout.preferredWidth: 26
-        Layout.preferredHeight: 26
-        radius: 13
-        color: "transparent"
-        border.width: 1
-        border.color: Theme.alpha(Theme.foreground, 0.3)
-        Text {
-            anchors.centerIn: parent
-            text: "?"
-            color: Theme.muted
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontBody
+        Image {
+            id: art
+            anchors.fill: parent
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            cache: true
+            sourceSize.width: 52
+            sourceSize.height: 52
+            source: badge.logoSource
+            visible: !badge.hidden && status === Image.Ready
+        }
+
+        // Shown when the side is withheld, when there is no artwork, and while
+        // a remote image is loading or has failed.
+        Rectangle {
+            anchors.fill: parent
+            visible: !art.visible
+            radius: badge.hidden ? width / 2 : 5
+            color: badge.hidden
+                ? "transparent"
+                : Qt.hsla(Model.monogramHue(badge.opponent) / 360, 0.45, Theme.dark ? 0.32 : 0.72, 1.0)
+            border.width: badge.hidden ? 1 : 0
+            border.color: Theme.alpha(Theme.foreground, 0.3)
+
+            Text {
+                anchors.centerIn: parent
+                text: badge.hidden ? "?" : Model.initialsFor(badge.opponent)
+                color: badge.hidden ? Theme.muted : (Theme.dark ? "#ffffff" : "#101010")
+                font.family: Theme.fontFamily
+                font.pixelSize: badge.hidden ? Theme.fontBody : Theme.fontCaption - 1
+                font.bold: !badge.hidden
+            }
         }
     }
 

@@ -30,16 +30,39 @@ Rectangle {
         anchors.rightMargin: 8
         spacing: 10
 
-        Image {
+        Item {
             Layout.preferredWidth: 24
             Layout.preferredHeight: 24
-            fillMode: Image.PreserveAspectFit
-            asynchronous: true
-            cache: true
-            sourceSize.width: 48
-            sourceSize.height: 48
-            source: row.team ? Model.logoFor(row.team, Theme.dark) : ""
-            visible: status === Image.Ready
+
+            Image {
+                id: teamArt
+                anchors.fill: parent
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                cache: true
+                sourceSize.width: 48
+                sourceSize.height: 48
+                source: row.team ? Model.logoFor(row.team, Theme.dark) : ""
+                visible: status === Image.Ready
+            }
+
+            // Most of the index comes from wiki team categories rather than
+            // fixtures, so the majority of rows have no artwork.
+            Rectangle {
+                anchors.fill: parent
+                visible: !teamArt.visible
+                radius: 5
+                color: Qt.hsla(Model.monogramHue(row.team) / 360, 0.45,
+                               Theme.dark ? 0.32 : 0.72, 1.0)
+                Text {
+                    anchors.centerIn: parent
+                    text: Model.initialsFor(row.team)
+                    color: Theme.dark ? "#ffffff" : "#101010"
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption - 1
+                    font.bold: true
+                }
+            }
         }
 
         ColumnLayout {

@@ -293,7 +293,10 @@ a current fixture outranks a dormant one, which is why the Dota row comes first
 above.
 
 Teams known only from the directory have no logo until they next play — the
-ticker is where artwork comes from.
+ticker is where artwork comes from — so they render as a monogram derived from
+the team's own tag where one is known ("TSpirit", "NAVI") and from its name
+otherwise. Artwork that is temporarily unavailable degrades the same way, which
+is why a missing logo looks deliberate rather than broken.
 
 ## First run
 
@@ -455,7 +458,9 @@ copy in `shared/`.
 ## Development
 
 ```bash
+./run-tests.sh                      # Go suites, the shared JS model, manifest validation
 go test ./...                       # real captured Liquipedia HTML, masking rules, redaction
+node tests/model.test.mjs           # shared/Model.js
 DEV_LINK=1 ./install.sh             # symlink the plugin from this checkout
 omarchy restart shell               # reload after a plugin edit
 journalctl -t omarchy-shell -f      # QML errors

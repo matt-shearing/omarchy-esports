@@ -3,9 +3,10 @@ import QtQuick.Layouts
 import qs.Commons
 import "Model.js" as Model
 
-// A team's logo and short name. Liquipedia publishes light and dark artwork
-// variants, so the badge follows the active omarchy theme rather than baking
-// in one background assumption.
+// Team logo and short name. Falls back to a monogram: most teams in the index
+// come from wiki team categories rather than fixtures and have no artwork, and
+// remote artwork can be temporarily unavailable besides. A blank square reads
+// as broken; two letters read as deliberate.
 RowLayout {
     id: badge
 
@@ -14,51 +15,54 @@ RowLayout {
     property QtObject bar: null
     property bool followed: false
 
-    spacing: Style.space(4)
-
     readonly property bool hidden: Model.isHiddenOpponent(opponent)
     readonly property string logoSource: hidden ? "" : Model.logoFor(opponent, darkTheme)
+    readonly property color fg: bar ? bar.foreground : Color.popups.text
 
-    Image {
+    spacing: Style.space(4)
+
+    Item {
         Layout.preferredWidth: Style.space(16)
         Layout.preferredHeight: Style.space(16)
         Layout.alignment: Qt.AlignVCenter
-        fillMode: Image.PreserveAspectFit
-        // Remote artwork must never block the UI thread, and a missing logo
-        // should degrade to just the name rather than an error box.
-        asynchronous: true
-        cache: true
-        source: badge.logoSource
-        visible: !badge.hidden && status === Image.Ready
-        sourceSize.width: Style.space(32)
-        sourceSize.height: Style.space(32)
-    }
 
-    // A withheld opponent shows a placeholder glyph, so the row reads as
-    // "deliberately hidden" rather than "data missing".
-    Rectangle {
-        visible: badge.hidden
-        Layout.preferredWidth: Style.space(16)
-        Layout.preferredHeight: Style.space(16)
-        Layout.alignment: Qt.AlignVCenter
-        radius: width / 2
-        color: "transparent"
-        border.width: 1
-        border.color: badge.bar ? badge.bar.foreground : Color.popups.text
-        opacity: 0.35
-        Text {
-            anchors.centerIn: parent
-            text: "?"
-            color: badge.bar ? badge.bar.foreground : Color.popups.text
-            font.family: badge.bar ? badge.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
+        Image {
+            id: art
+            anchors.fill: parent
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            cache: true
+            sourceSize.width: Style.space(32)
+            sourceSize.height: Style.space(32)
+            source: badge.logoSource
+            visible: !badge.hidden && status === Image.Ready
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: !art.visible
+            radius: badge.hidden ? width / 2 : Style.space(3)
+            color: badge.hidden ? "transparent" : Qt.rgba(badge.fg.r, badge.fg.g, badge.fg.b, 0.14)
+            border.width: badge.hidden ? 1 : 0
+            border.color: badge.fg
+            opacity: badge.hidden ? 0.35 : 1.0
+
+            Text {
+                anchors.centerIn: parent
+                text: badge.hidden ? "?" : Model.initialsFor(badge.opponent)
+                color: badge.fg
+                opacity: badge.hidden ? 1.0 : 0.75
+                font.family: badge.bar ? badge.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption - 1
+                font.bold: !badge.hidden
+            }
         }
     }
 
     Text {
         Layout.alignment: Qt.AlignVCenter
         text: Model.opponentLabel(badge.opponent)
-        color: badge.bar ? badge.bar.foreground : Color.popups.text
+        color: badge.fg
         font.family: badge.bar ? badge.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.bodySmall
         font.bold: badge.followed

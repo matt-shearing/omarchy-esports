@@ -413,6 +413,18 @@ func (c Config) TeamNames() []string {
 	return out
 }
 
+// KnownWiki reports whether a slug is one this build knows about, whether or
+// not it is currently being polled.
+func (c Config) KnownWiki(slug string) bool {
+	for _, w := range c.Wikis {
+		if strings.EqualFold(w.Slug, slug) {
+			return true
+		}
+	}
+	_, ok := CatalogFor(strings.ToLower(slug))
+	return ok
+}
+
 // WikiEnabled reports whether a wiki slug is configured and enabled.
 func (c Config) WikiEnabled(slug string) bool {
 	for _, w := range c.Wikis {
