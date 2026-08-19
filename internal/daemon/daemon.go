@@ -140,6 +140,16 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 		return fmt.Errorf("loading state: %w", err)
 	}
 
+	// Restore and respect an API pause recorded earlier.
+	if !priv.APIBackoffUntil.IsZero() {
+		d.lp.SetRateLimitedUntil(priv.APIBackoffUntil)
+	}
+	if d.lp.RateLimited() {
+		d.logger.Printf("skipping refresh: rate limited until %s",
+			d.lp.RateLimitedUntil().Format(time.Kitchen))
+		return d.publish(priv, []string{"Liquipedia is rate limiting this address; showing cached data"})
+	}
+
 	var all []match.Match
 	var errs []string
 	for _, w := range d.cfg.EnabledWikis() {
@@ -190,6 +200,10 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	priv.UpdatedAt = time.Now()
 	if err := d.store.SavePrivate(priv); err != nil {
 		return fmt.Errorf("saving state: %w", err)
+	}
+	if until := d.lp.RateLimitedUntil(); until.After(priv.APIBackoffUntil) {
+		priv.APIBackoffUntil = until
+		d.logger.Printf("rate limited; pausing API traffic until %s", until.Format(time.Kitchen))
 	}
 	d.dispatchNotifications(&priv)
 	if err := d.store.SavePrivate(priv); err != nil {
@@ -677,10 +691,45 @@ func (d *Daemon) reloadConfigIfChanged() {
 		d.logger.Printf("reloading config: %v", err)
 		return
 	}
+
+	before := enabledSet(d.cfg)
+	after := enabledSet(cfg)
+
 	d.configModTime = fi.ModTime()
 	d.cfg = cfg
-	d.logger.Printf("config reloaded: %d team(s), spoilers=%s, catch-up=%v",
-		len(cfg.Teams), cfg.Spoilers, cfg.CatchUp.Enabled)
+	d.logger.Printf("config reloaded: %d team(s), %d game(s), spoilers=%s, catch-up=%v",
+		len(cfg.Teams), len(after), cfg.Spoilers, cfg.CatchUp.Enabled)
+
+	// Turning a game on should do something visible. Its fixtures and its
+	// team directory both arrive with a refresh, and the next scheduled one
+	// can be a quarter of an hour away — long enough that enabling a game
+	// looks like it did nothing at all.
+	var added []string
+	for slug := range after {
+		if !before[slug] {
+			added = append(added, slug)
+		}
+	}
+	if len(added) == 0 {
+		return
+	}
+	sort.Strings(added)
+	d.logger.Printf("games enabled: %s — refreshing now", strings.Join(added, ", "))
+	go func() {
+		if err := d.RefreshOnce(context.Background()); err != nil &&
+			!errors.Is(err, context.Canceled) {
+			d.logger.Printf("refresh after enabling a game: %v", err)
+		}
+	}()
+}
+
+// enabledSet is the set of enabled wiki slugs.
+func enabledSet(c config.Config) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range c.EnabledWikis() {
+		out[w.Slug] = true
+	}
+	return out
 }
 
 // Reevaluate refreshes derived state and fires time-based notifications

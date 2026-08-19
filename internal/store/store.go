@@ -68,6 +68,10 @@ type Private struct {
 	// the app's follow-list search without extra API calls. It is kept across
 	// refreshes so it grows into a useful directory over time.
 	Teams map[string]TeamEntry `json:"teams"`
+	// APIBackoffUntil persists the API rate-limit pause across restarts, for
+	// the same reason as the artwork one: restarting must not resume traffic
+	// an endpoint has just refused.
+	APIBackoffUntil time.Time `json:"apiBackoffUntil,omitempty"`
 	// LogoBackoffUntil persists the artwork rate-limit pause across restarts.
 	// Holding it only in memory meant every daemon restart resumed hammering
 	// an endpoint that had just asked us to stop, which is the surest way to

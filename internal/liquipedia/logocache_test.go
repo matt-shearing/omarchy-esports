@@ -135,3 +135,22 @@ func TestBackoffSurvivesRestore(t *testing.T) {
 		t.Errorf("backoff shortened to %s, want %s", got, until)
 	}
 }
+
+// TestClientRateLimitBackoff: a 429 from the API must pause all traffic, and
+// the pause must be restorable so a restart does not resume hammering.
+func TestClientRateLimitBackoff(t *testing.T) {
+	c := New("test", "test@example.com", t.TempDir())
+	if c.RateLimited() {
+		t.Fatal("a fresh client should not be paused")
+	}
+	until := time.Now().Add(10 * time.Minute)
+	c.SetRateLimitedUntil(until)
+	if !c.RateLimited() {
+		t.Error("restored pause should be in effect")
+	}
+	// An earlier time must not shorten an active pause.
+	c.SetRateLimitedUntil(time.Now().Add(time.Minute))
+	if got := c.RateLimitedUntil(); !got.Equal(until) {
+		t.Errorf("pause shortened to %s, want %s", got, until)
+	}
+}

@@ -273,15 +273,33 @@ function followLabel(entry) {
   return game ? name + " (" + game + ")" : String(name)
 }
 
-// gamesInIndex lists the distinct games present in the team index, for the
-// search filter chips.
-function gamesInIndex(index) {
-  var seen = {}, out = []
+// filterGames lists the games to offer as search filters.
+//
+// Derived from the enabled games in the config, NOT from the team index. The
+// index only contains wikis that have already been polled and swept, so
+// deriving from it meant a game you had just switched on simply did not appear
+// — the chip waited on a refresh cycle that could be a quarter of an hour away.
+//
+// `indexed` reports whether that game's teams have been catalogued yet, so the
+// UI can say "indexing" instead of showing an empty result list.
+function filterGames(config, index) {
+  var counts = {}
   for (var i = 0; i < index.length; i++) {
-    var t = index[i]
-    if (!t.wiki || seen[t.wiki]) continue
-    seen[t.wiki] = true
-    out.push({ wiki: t.wiki, game: t.game || t.wiki })
+    var w = index[i].wiki
+    if (w) counts[w] = (counts[w] || 0) + 1
+  }
+  var out = []
+  var wikis = (config && config.wikis) ? config.wikis : []
+  for (var j = 0; j < wikis.length; j++) {
+    var k = wikis[j]
+    if (!k.enabled) continue
+    out.push({
+      wiki: k.slug,
+      game: k.game || k.slug,
+      short: k.short || "",
+      count: counts[k.slug] || 0,
+      indexed: (counts[k.slug] || 0) > 0
+    })
   }
   out.sort(function (a, b) { return String(a.game).localeCompare(String(b.game)) })
   return out

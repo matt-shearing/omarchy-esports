@@ -217,7 +217,7 @@ ShellRoot {
     readonly property var vodTournaments: Model.tournamentsWithVods(model.matches)
     readonly property var searchResults: Model.searchTeams(teamIndex, teamQuery,
         { minChars: 2, limit: 20, wiki: gameFilter })
-    readonly property var indexGames: Model.gamesInIndex(teamIndex)
+    readonly property var indexGames: Model.filterGames(config, teamIndex)
     property string selectedTeamWiki: ""
     readonly property var teamDetail: Model.teamMatches(model.matches, selectedTeam, selectedTeamWiki)
 
@@ -579,13 +579,25 @@ ShellRoot {
                             model: app.indexGames
                             delegate: AppButton {
                                 required property var modelData
-                                text: modelData.game
+                                // A game switched on but not yet catalogued
+                                // says so, rather than looking broken.
+                                text: modelData.indexed ? modelData.game
+                                    : modelData.game + " (indexing…)"
+                                subtle: !modelData.indexed
                                 accentuated: app.gameFilter === modelData.wiki
                                 onClicked: app.gameFilter = modelData.wiki
                             }
                         }
 
                         Item { Layout.fillWidth: true }
+
+                        Text {
+                            visible: app.indexGames.length < 2
+                            text: "Add games in Settings"
+                            color: Theme.muted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                        }
                     }
 
                     Text {
@@ -595,8 +607,16 @@ ShellRoot {
                                 return "Following " + app.model.teams.length + " team(s) · " +
                                        app.teamIndex.length + " teams indexed from recent matches"
                             if (q.length < 2) return "Keep typing…"
-                            if (app.searchResults.length === 0)
-                                return "No match for \"" + q + "\" — the index covers teams seen in recent fixtures"
+                            if (app.searchResults.length === 0) {
+                                // Distinguish "no such team" from "that game
+                                // has not been catalogued yet".
+                                for (var i = 0; i < app.indexGames.length; i++) {
+                                    var g = app.indexGames[i]
+                                    if (g.wiki === app.gameFilter && !g.indexed)
+                                        return g.game + " is still being indexed — its teams appear after the next refresh"
+                                }
+                                return "No match for \"" + q + "\""
+                            }
                             return app.searchResults.length + " result(s)"
                         }
                         color: Theme.muted

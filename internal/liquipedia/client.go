@@ -23,6 +23,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,6 +59,40 @@ type Client struct {
 	mu        sync.Mutex
 	lastParse time.Time
 	lastOther time.Time
+	// backoffUntil pauses all API traffic after a 429. Without it the daemon
+	// keeps its normal schedule while blocked, which prolongs the block.
+	backoffUntil time.Time
+}
+
+// ErrRateLimited reports that Liquipedia asked us to stop.
+var ErrRateLimited = errors.New("liquipedia is rate limiting this address")
+
+// apiBackoff is how long to pause after a 429. Their terms warn that repeated
+// violations can turn a temporary block into a permanent one, so this is
+// deliberately generous.
+const apiBackoff = 20 * time.Minute
+
+// RateLimitedUntil reports when API traffic may resume.
+func (c *Client) RateLimitedUntil() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.backoffUntil
+}
+
+// SetRateLimitedUntil restores a persisted pause.
+func (c *Client) SetRateLimitedUntil(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if t.After(c.backoffUntil) {
+		c.backoffUntil = t
+	}
+}
+
+// RateLimited reports whether API traffic is currently paused.
+func (c *Client) RateLimited() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Before(c.backoffUntil)
 }
 
 // New builds a Client. contact should be a working email or URL; version is
@@ -107,6 +142,9 @@ func (c *Client) throttle(ctx context.Context, isParse bool) error {
 
 // get performs a rate-limited, gzip-encoded, identified GET.
 func (c *Client) get(ctx context.Context, rawURL string, isParse bool) ([]byte, error) {
+	if c.RateLimited() {
+		return nil, ErrRateLimited
+	}
 	if err := c.throttle(ctx, isParse); err != nil {
 		return nil, err
 	}
@@ -138,6 +176,12 @@ func (c *Client) get(ctx context.Context, rawURL string, isParse bool) ([]byte, 
 	body, err := io.ReadAll(io.LimitReader(reader, 32<<20))
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		c.mu.Lock()
+		c.backoffUntil = time.Now().Add(apiBackoff)
+		c.mu.Unlock()
+		return nil, ErrRateLimited
 	}
 	if resp.StatusCode != http.StatusOK {
 		snippet := string(body)
