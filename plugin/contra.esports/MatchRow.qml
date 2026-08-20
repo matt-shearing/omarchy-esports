@@ -348,7 +348,8 @@ Rectangle {
 
                 Button {
                     visible: row.blacked || row.masked
-                    text: "Reveal"
+                    // Pairs with the 󰈉 shown on a blacked row.
+                    text: "󰈈"
                     fontSize: Style.font.caption
                     foreground: row.fg
                     fontFamily: row.bar ? row.bar.fontFamily : Style.font.family
@@ -360,7 +361,7 @@ Rectangle {
 
                 Button {
                     visible: !!(row.finished && row.match && row.match.followed && !row.match.watched)
-                    text: "Mark watched"
+                    text: "󰄬"
                     fontSize: Style.font.caption
                     foreground: row.fg
                     fontFamily: row.bar ? row.bar.fontFamily : Style.font.family
@@ -372,7 +373,7 @@ Rectangle {
 
                 Button {
                     visible: Model.tournamentUrl(row.match) !== ""
-                    text: "Liquipedia"
+                    text: "󰖟"
                     fontSize: Style.font.caption
                     foreground: row.fg
                     fontFamily: row.bar ? row.bar.fontFamily : Style.font.family

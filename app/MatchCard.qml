@@ -60,7 +60,7 @@ Rectangle {
         // Time column
         ColumnLayout {
             Layout.fillWidth: false
-            Layout.preferredWidth: 74
+            Layout.preferredWidth: 66
             Layout.alignment: Qt.AlignVCenter
             spacing: 2
 
@@ -185,8 +185,8 @@ Rectangle {
             // the teams — they carry the content the row exists for. Every
             // other column being fillWidth by default is what starved them.
             Layout.fillWidth: false
-            Layout.preferredWidth: 240
-            Layout.maximumWidth: 240
+            Layout.preferredWidth: 210
+            Layout.maximumWidth: 210
             Layout.alignment: Qt.AlignVCenter
             spacing: 2
 
@@ -219,6 +219,7 @@ Rectangle {
                     var parts = []
                     if (card.match && Model.bestOfLabel(card.match)) parts.push(Model.bestOfLabel(card.match))
                     if (card.match && card.match.game) parts.push(card.match.game)
+                    if (card.highlightsOnly) parts.push("highlights only")
                     if (card.masked) parts.push("opponent hidden")
                     return parts.join(" · ")
                 }
@@ -243,8 +244,8 @@ Rectangle {
             // width and swallowed every row's surplus — several hundred pixels
             // of void sitting next to elided team names.
             Layout.fillWidth: false
-            Layout.preferredWidth: 232
-            Layout.maximumWidth: 232
+            Layout.preferredWidth: 96
+            Layout.maximumWidth: 96
             Layout.alignment: Qt.AlignVCenter
             spacing: 6
 
@@ -272,8 +273,10 @@ Rectangle {
             // than happening as a side effect of opening a video.
             AppButton {
                 visible: card.blacked || card.masked
-                text: "Reveal"
+                text: "\u25c9"
+                iconOnly: true
                 subtle: true
+                tooltip: "Reveal the result"
                 onClicked: card.reveal()
             }
 
@@ -282,7 +285,7 @@ Rectangle {
             // varies by row moved it by over a hundred pixels between
             // neighbours, and the eye had to hunt for it each time.
             Item {
-                Layout.preferredWidth: 100
+                Layout.preferredWidth: 26
                 Layout.preferredHeight: 26
                 Layout.alignment: Qt.AlignVCenter
 
@@ -290,8 +293,14 @@ Rectangle {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     visible: card.live || (!card.finished && card.match && Model.preferredStream(card.match) !== null) || card.hasVod
-                    text: card.hasVod ? (card.highlightsOnly ? "Highlights" : "Watch VOD") : "Watch"
-                    accentuated: card.live || card.queueHead
+                    text: "\u25b6"
+                    iconOnly: true
+                    accentuated: true
+                    // What it opens is spelled out on the meta line rather
+                    // than in the button, so the control stays one width.
+                    tooltip: card.hasVod
+                        ? (card.highlightsOnly ? "Watch highlights" : "Watch the VOD")
+                        : (card.live ? "Watch live" : "Open the stream")
                     onClicked: card.watch()
                 }
             }
