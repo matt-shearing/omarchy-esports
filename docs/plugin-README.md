@@ -22,15 +22,9 @@ This plugin is the front end. It never talks to the network. The
 ## Requires the daemon
 
 Until the daemon is running the widget shows a panel that names the repo.
-
-```sh
-git clone https://github.com/matt-shearing/omarchy-esports.git
-cd omarchy-esports && ./install.sh
-```
-
-That builds the daemon (Go is required), the companion app, and a user-session
-service. If this plugin is already a git checkout, `install.sh` leaves it
-alone. No sudo or pkexec is required.
+Install it from [omarchy-esports](https://github.com/matt-shearing/omarchy-esports)
+(Go is required to build it). If this plugin is already a git checkout, that
+repo's installer leaves it alone. No sudo or pkexec is required.
 
 ## Install
 
@@ -39,16 +33,6 @@ omarchy plugin add https://github.com/matt-shearing/omarchy-esports-plugin.git -
 ```
 
 That clones the plugin and can place the widget on the left side of the bar.
-
-Or by hand:
-
-```sh
-git clone https://github.com/matt-shearing/omarchy-esports-plugin.git \
-  ~/.config/omarchy/plugins/contra.esports
-omarchy-shell shell rescanPlugins
-omarchy plugin enable contra.esports --section left
-```
-
 Nothing in `~/.config` is rewritten except the bar layout entry Omarchy adds
 when you enable the plugin.
 
