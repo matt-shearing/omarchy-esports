@@ -205,7 +205,10 @@ Rectangle {
                 visible: Model.tournamentUrl(card.match) !== ""
                 text: "Liquipedia"
                 subtle: true
-                onClicked: Qt.openUrlExternally(Model.tournamentUrl(card.match))
+                onClicked: {
+                    var u = Model.safeExternalUrl(Model.tournamentUrl(card.match))
+                    if (u) Qt.openUrlExternally(u)
+                }
             }
 
             // Revealing is a deliberate act, so it gets its own control rather

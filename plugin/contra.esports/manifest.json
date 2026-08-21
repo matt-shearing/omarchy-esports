@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "contra.esports",
   "name": "Esports",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "contra",
   "description": "Spoiler-free esports schedule with streams and VODs",
   "license": "MIT",

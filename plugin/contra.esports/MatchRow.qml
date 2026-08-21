@@ -69,6 +69,7 @@ Rectangle {
                 spacing: 0
 
                 Text {
+                    textFormat: Text.PlainText
                     text: row.live ? "LIVE" : (row.finished ? "" : Model.clockTime(row.match))
                     color: row.live ? (row.bar ? row.bar.urgent : Color.accent) : row.fg
                     font.family: row.bar ? row.bar.fontFamily : Style.font.family
@@ -76,6 +77,7 @@ Rectangle {
                     font.bold: row.live
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: !row.live && !row.finished
                     text: Model.countdown(row.match, row.nowMs)
                     color: row.fg
@@ -84,6 +86,7 @@ Rectangle {
                     font.pixelSize: Style.font.caption
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: row.finished
                     text: Model.hasVod(row.match) ? "VOD" : "done"
                     color: row.fg
@@ -105,6 +108,7 @@ Rectangle {
                 }
 
                 Text {
+                    textFormat: Text.PlainText
                     text: Model.scoreLabel(row.match) !== "" ? Model.scoreLabel(row.match) : "v"
                     color: row.fg
                     opacity: 0.45
@@ -129,6 +133,7 @@ Rectangle {
                 spacing: 0
 
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: row.match ? Model.truncate(row.match.tournament.name, 28) : ""
                     color: row.fg
@@ -142,6 +147,7 @@ Rectangle {
                 // orientation when several games share one list, but never
                 // competing with the fixture itself.
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: {
                         if (!row.match) return ""
@@ -160,6 +166,7 @@ Rectangle {
             }
 
             Text {
+                textFormat: Text.PlainText
                 Layout.alignment: Qt.AlignVCenter
                 text: {
                     if (row.masked) return "󰛑"
@@ -186,6 +193,7 @@ Rectangle {
             PanelSeparator { foreground: row.fg }
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: {
                     if (!row.match) return ""
@@ -200,6 +208,7 @@ Rectangle {
             }
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: {
                     if (!row.match) return ""
@@ -219,6 +228,7 @@ Rectangle {
 
             // Explains a blackout instead of leaving the user guessing.
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: row.masked || row.blacked
                 text: row.masked ? Model.maskExplanation(row.match)

@@ -7,6 +7,164 @@ var STATE_LIVE = "live"
 var STATE_UPCOMING = "upcoming"
 var STATE_FINISHED = "finished"
 
+// The widget runs inside the long-lived omarchy-shell process and treats
+// state.json as untrusted input: a crafted file (or a compromised daemon)
+// must not be able to load attacker-chosen resources or open arbitrary URLs.
+//
+// Qt Text defaults to AutoText, so a team name starting with "<" is parsed
+// as HTML/rich text. Image.source will fetch http(s). Qt.openUrlExternally
+// will hand a URL to xdg-open. All three are gated here.
+
+function scrubText(s) {
+  if (s == null || s === undefined) return ""
+  s = String(s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+  s = s.replace(/[<>]/g, "")
+  if (s.length > 300) s = s.substring(0, 300)
+  return s
+}
+
+var EXTERNAL_HOSTS = [
+  "liquipedia.net",
+  "youtube.com",
+  "youtu.be",
+  "youtube-nocookie.com",
+  "twitch.tv",
+  "kick.com"
+]
+
+function hostAllowed(host) {
+  host = String(host || "").toLowerCase()
+  if (host.charAt(host.length - 1) === ".") host = host.slice(0, -1)
+  for (var i = 0; i < EXTERNAL_HOSTS.length; i++) {
+    var h = EXTERNAL_HOSTS[i]
+    if (host === h || (host.length > h.length && host.slice(-(h.length + 1)) === "." + h))
+      return true
+  }
+  return false
+}
+
+function safeExternalUrl(url) {
+  if (!url) return ""
+  var s = String(url).trim()
+  if (s.indexOf("https://") !== 0) return ""
+  if (s.indexOf("\\") >= 0 || s.indexOf("@") >= 0) return ""
+  var rest = s.slice(8)
+  var slash = rest.indexOf("/")
+  var hostport = slash < 0 ? rest : rest.slice(0, slash)
+  var host = hostport.split(":")[0]
+  if (!host || host.indexOf("..") >= 0) return ""
+  if (!hostAllowed(host)) return ""
+  return s
+}
+
+function wikiPath(path) {
+  if (!path) return ""
+  var s = String(path).trim()
+  if (s.charAt(0) !== "/") return ""
+  if (s.indexOf("://") >= 0 || s.indexOf("//") === 0) return ""
+  if (s.indexOf("..") >= 0 || s.indexOf("\\") >= 0) return ""
+  if (/[<>\s]/.test(s)) return ""
+  return s
+}
+
+function sanitizeVideoId(id) {
+  id = String(id || "")
+  return /^[A-Za-z0-9_-]{6,20}$/.test(id) ? id : ""
+}
+
+function safeLogoSource(url) {
+  if (!url) return ""
+  var path = String(url)
+  if (path.indexOf("file://") === 0) path = path.slice(7)
+  if (path.indexOf("..") >= 0 || path.indexOf("?") >= 0 || path.indexOf("#") >= 0) return ""
+  if (path.charAt(0) !== "/") return ""
+  var marker = "/.cache/omarchy-esports/logos/"
+  var i = path.indexOf(marker)
+  if (i < 0) return ""
+  var rest = path.slice(i + marker.length)
+  if (!/^[0-9a-f]{8,64}\.(png|jpg|jpeg|webp)$/i.test(rest)) return ""
+  return "file://" + path
+}
+
+function sanitizeOpponent(o) {
+  if (!o || typeof o !== "object") return o
+  var logo = o.logo || {}
+  return {
+    name: scrubText(o.name),
+    short: scrubText(o.short),
+    page: wikiPath(o.page),
+    hidden: o.hidden === true,
+    logo: {
+      light: safeLogoSource(logo.light),
+      dark: safeLogoSource(logo.dark),
+      local: safeLogoSource(logo.local)
+    }
+  }
+}
+
+function sanitizeMatch(m) {
+  if (!m || typeof m !== "object") return m
+  var opponents = []
+  var rawOpp = Array.isArray(m.opponents) ? m.opponents : []
+  for (var i = 0; i < rawOpp.length; i++) opponents.push(sanitizeOpponent(rawOpp[i]))
+  var streams = []
+  var rawSt = Array.isArray(m.streams) ? m.streams : []
+  for (var j = 0; j < rawSt.length; j++) {
+    var s = rawSt[j] || {}
+    var url = safeExternalUrl(s.url)
+    if (!url) continue
+    streams.push({
+      platform: scrubText(s.platform),
+      channel: scrubText(s.channel),
+      url: url,
+      language: scrubText(s.language),
+      primary: s.primary === true
+    })
+  }
+  var vod = null
+  if (m.vod && typeof m.vod === "object") {
+    var vid = sanitizeVideoId(m.vod.videoId)
+    var vurl = safeExternalUrl(m.vod.url)
+    if (!vurl && vid) vurl = "https://www.youtube.com/watch?v=" + vid
+    if (vid || vurl) {
+      vod = {
+        videoId: vid,
+        url: vurl,
+        title: "",
+        channel: scrubText(m.vod.channel),
+        kind: scrubText(m.vod.kind)
+      }
+    }
+  }
+  var t = m.tournament || {}
+  return {
+    id: scrubText(m.id),
+    wiki: scrubText(m.wiki),
+    game: scrubText(m.game),
+    gameShort: scrubText(m.gameShort),
+    startsAt: scrubText(m.startsAt),
+    opponents: opponents,
+    bestOf: m.bestOf,
+    tournament: { name: scrubText(t.name), page: wikiPath(t.page), tier: t.tier, tierLabel: scrubText(t.tierLabel) },
+    state: scrubText(m.state),
+    score: m.score,
+    redacted: m.redacted === true,
+    masked: m.masked === true,
+    maskedFor: scrubText(m.maskedFor),
+    followed: m.followed === true,
+    watched: m.watched === true,
+    queueHead: m.queueHead === true,
+    streams: streams,
+    vod: vod
+  }
+}
+
+function sanitizeTeam(t) {
+  if (!t) return t
+  if (typeof t === "string") return { name: scrubText(t) }
+  return { name: scrubText(t.name), wiki: scrubText(t.wiki), game: scrubText(t.game) }
+}
+
 // parseState decodes the daemon's state.json, tolerating a missing or
 // half-written file: the widget must never throw on startup.
 function parseState(text) {
@@ -15,13 +173,18 @@ function parseState(text) {
   try {
     var doc = JSON.parse(text)
     if (!doc || !Array.isArray(doc.matches)) return empty
+    var matches = []
+    for (var i = 0; i < doc.matches.length; i++) matches.push(sanitizeMatch(doc.matches[i]))
+    var teams = []
+    var rawTeams = Array.isArray(doc.teams) ? doc.teams : []
+    for (var j = 0; j < rawTeams.length; j++) teams.push(sanitizeTeam(rawTeams[j]))
     return {
-      matches: doc.matches,
-      updatedAt: doc.updatedAt || "",
+      matches: matches,
+      updatedAt: scrubText(doc.updatedAt || ""),
       spoilers: doc.spoilers || "strict",
-      teams: Array.isArray(doc.teams) ? doc.teams : [],
-      errors: Array.isArray(doc.errors) ? doc.errors : [],
-      attribution: doc.attribution || "",
+      teams: teams,
+      errors: [],
+      attribution: scrubText(doc.attribution || ""),
       ok: true
     }
   } catch (e) {
@@ -72,12 +235,12 @@ function dayLabel(match, nowMs) {
 
 function opponentName(o) {
   if (!o) return "?"
-  return o.short || o.name || "?"
+  return scrubText(o.short || o.name || "?") || "?"
 }
 
 function fullName(o) {
   if (!o) return "?"
-  return o.name || o.short || "?"
+  return scrubText(o.name || o.short || "?") || "?"
 }
 
 function title(match) {
@@ -117,11 +280,18 @@ function preferredStream(match) {
   var twitchEN = null, anyEN = null, anyTwitch = null
   for (var i = 0; i < streams.length; i++) {
     var s = streams[i]
+    if (!s || !safeExternalUrl(s.url)) continue
     if (s.platform === "twitch" && s.language === "en" && !twitchEN) twitchEN = s
     else if (s.language === "en" && !anyEN) anyEN = s
     else if (s.platform === "twitch" && !anyTwitch) anyTwitch = s
   }
-  return twitchEN || anyEN || anyTwitch || streams[0]
+  var pick = twitchEN || anyEN || anyTwitch || null
+  if (!pick) {
+    for (var j = 0; j < streams.length; j++) {
+      if (streams[j] && safeExternalUrl(streams[j].url)) { pick = streams[j]; break }
+    }
+  }
+  return pick
 }
 
 // initialsFor builds a monogram for a team with no artwork.
@@ -179,9 +349,11 @@ function monogramHue(nameOrTeam) {
 function logoFor(opponent, darkTheme) {
   if (!opponent || !opponent.logo) return ""
   var l = opponent.logo
-  if (darkTheme && l.dark) return l.dark
-  if (!darkTheme && l.light) return l.light
-  return l.light || l.dark || l.local || ""
+  var raw = ""
+  if (darkTheme && l.dark) raw = l.dark
+  else if (!darkTheme && l.light) raw = l.light
+  else raw = l.light || l.dark || l.local || ""
+  return safeLogoSource(raw)
 }
 
 // sections groups matches for display: live first, then upcoming by day, then
@@ -348,9 +520,8 @@ function maskNote(match) {
 var LIQUIPEDIA = "https://liquipedia.net"
 
 function absoluteUrl(path) {
-  if (!path) return ""
-  if (path.indexOf("http") === 0) return path
-  return LIQUIPEDIA + path
+  var p = wikiPath(path)
+  return p ? (LIQUIPEDIA + p) : ""
 }
 
 function tournamentUrl(match) {
@@ -378,7 +549,9 @@ function isHighlightVod(match) {
 
 function vodUrl(match) {
   if (!hasVod(match)) return ""
-  return match.vod.url || ("https://www.youtube.com/watch?v=" + match.vod.videoId)
+  if (match.vod.url) return safeExternalUrl(match.vod.url)
+  var id = sanitizeVideoId(match.vod.videoId)
+  return id ? ("https://www.youtube.com/watch?v=" + id) : ""
 }
 
 // vodSections splits recorded matches into the catch-up queue and the archive.

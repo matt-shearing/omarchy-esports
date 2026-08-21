@@ -163,6 +163,67 @@ check("parseConfig normalises the follow list", () => {
   eq(c.teams[1].wiki, "dota2");
 });
 
+check("scrubText strips markup so Qt AutoText cannot run", () => {
+  eq(Model.scrubText("<img src='https://evil.example/x'>Spirit"), "img src='https://evil.example/x'Spirit");
+  eq(Model.scrubText("Team Liquid"), "Team Liquid");
+  eq(Model.opponentName({ name: "<b>Evil</b>", short: "" }), "bEvil/b");
+});
+
+check("safeExternalUrl allows https youtube twitch liquipedia kick", () => {
+  eq(Model.safeExternalUrl("https://www.twitch.tv/x"), "https://www.twitch.tv/x");
+  eq(Model.safeExternalUrl("https://www.youtube.com/watch?v=aaaaaaaaaaa"), "https://www.youtube.com/watch?v=aaaaaaaaaaa");
+  eq(Model.safeExternalUrl("https://liquipedia.net/dota2/x"), "https://liquipedia.net/dota2/x");
+  eq(Model.safeExternalUrl("https://kick.com/x"), "https://kick.com/x");
+});
+
+check("safeExternalUrl rejects other schemes hosts and credentials", () => {
+  eq(Model.safeExternalUrl("http://www.twitch.tv/x"), "");
+  eq(Model.safeExternalUrl("https://evil.example/x"), "");
+  eq(Model.safeExternalUrl("file:///etc/passwd"), "");
+  eq(Model.safeExternalUrl("javascript:alert(1)"), "");
+  eq(Model.safeExternalUrl("https://evil.com@www.youtube.com/watch"), "");
+  eq(Model.safeExternalUrl("//www.youtube.com/watch"), "");
+});
+
+check("absoluteUrl only builds liquipedia wiki paths", () => {
+  eq(Model.absoluteUrl("/dota2/Team_Liquid"), "https://liquipedia.net/dota2/Team_Liquid");
+  eq(Model.absoluteUrl("https://evil.example/"), "");
+  eq(Model.absoluteUrl("//evil.example"), "");
+  eq(Model.absoluteUrl("/dota2/../etc/passwd"), "");
+  eq(Model.absoluteUrl("dota2/Team_Liquid"), "");
+});
+
+check("logoFor only returns cached file URLs", () => {
+  eq(Model.logoFor({ logo: { light: "https://evil.example/x.png" } }, false), "");
+  eq(Model.logoFor({ logo: { light: "file:///etc/passwd" } }, false), "");
+  eq(
+    Model.logoFor({ logo: { light: "file:///home/u/.cache/omarchy-esports/logos/aaaaaaaa.png" } }, false),
+    "file:///home/u/.cache/omarchy-esports/logos/aaaaaaaa.png"
+  );
+  eq(Model.logoFor({ logo: { light: "file:///home/u/.cache/omarchy-esports/logos/aaaaaaaa.svg" } }, false), "");
+});
+
+check("parseState scrubs names pages streams and logos", () => {
+  const s = Model.parseState(JSON.stringify({
+    matches: [{
+      opponents: [{ name: "<b>Evil</b>", short: "EV", page: "https://evil.example/", logo: { light: "https://evil.example/x.png" } }],
+      tournament: { name: "<img src=x>", page: "https://evil.example/" },
+      game: "Dota 2",
+      streams: [{ url: "https://evil.example/live" }, { url: "https://www.twitch.tv/ok" }],
+      vod: { videoId: "dQw4w9wgxcQ", url: "https://evil.example/v" },
+    }],
+    attribution: "<script>x</script>",
+  }));
+  eq(s.ok, true);
+  eq(s.matches[0].opponents[0].name, "bEvil/b");
+  eq(s.matches[0].opponents[0].page, "");
+  eq(s.matches[0].opponents[0].logo.light, "");
+  eq(s.matches[0].tournament.page, "");
+  eq(s.matches[0].streams.map((x) => x.url), ["https://www.twitch.tv/ok"]);
+  eq(s.matches[0].vod.url, "https://www.youtube.com/watch?v=dQw4w9wgxcQ");
+  ok(!s.attribution.includes("<"), "attribution must not contain markup");
+});
+
 check("parseConfig survives junk", () => {
   ok(!Model.parseConfig("not json").ok);
   ok(!Model.parseConfig("").ok);

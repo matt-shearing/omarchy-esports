@@ -162,7 +162,8 @@ ShellRoot {
             return
         }
         var s = Model.preferredStream(m)
-        if (s && s.url) Qt.openUrlExternally(s.url)
+        var u = s ? Model.safeExternalUrl(s.url) : ""
+        if (u) Qt.openUrlExternally(u)
     }
 
     // isFollowed answers for a specific game scope. Passing an empty wiki asks

@@ -131,8 +131,9 @@ Panel {
     }
 
     function openUrl(url) {
-        if (!url) return
-        Qt.openUrlExternally(url)
+        var u = Model.safeExternalUrl(url)
+        if (!u) return
+        Qt.openUrlExternally(u)
         root.close()
     }
 
@@ -161,15 +162,11 @@ Panel {
     function activate(m) {
         if (!m) return
         if (m.vod && m.vod.url) {
-            Qt.openUrlExternally(m.vod.url)
-            root.close()
+            root.openUrl(m.vod.url)
             return
         }
         var s = Model.preferredStream(m)
-        if (s && s.url) {
-            Qt.openUrlExternally(s.url)
-            root.close()
-        }
+        if (s && s.url) root.openUrl(s.url)
     }
 
     onOpenedChanged: if (opened) {
@@ -267,6 +264,7 @@ Panel {
                     Item { Layout.fillWidth: true }
 
                     Text {
+                        textFormat: Text.PlainText
                         visible: root.model.spoilers !== "off"
                         text: "󰈉 spoiler-free"
                         color: root.bar ? root.bar.foreground : Color.popups.text
@@ -308,6 +306,7 @@ Panel {
 
                 // Empty / error states
                 Text {
+                    textFormat: Text.PlainText
                     visible: !root.model.ok
                     Layout.fillWidth: true
                     text: "Waiting for the esports daemon.\n\nIf it is installed:  omarchy-esports refresh\nIf not:  github.com/matt-shearing/omarchy-esports"
@@ -319,6 +318,7 @@ Panel {
                 }
 
                 Text {
+                    textFormat: Text.PlainText
                     visible: root.model.ok && root.groups.length === 0
                     Layout.fillWidth: true
                     text: {
@@ -361,6 +361,7 @@ Panel {
                         visible: visibleMatches.length > 0
 
                         Text {
+                            textFormat: Text.PlainText
                             text: modelData.header
                             color: modelData.kind === "live"
                                 ? (root.bar ? root.bar.urgent : Color.accent)
@@ -410,6 +411,7 @@ Panel {
                     spacing: Style.space(8)
 
                     Text {
+                        textFormat: Text.PlainText
                         text: (root.model.attribution !== "" ? root.model.attribution
                             : "Data via Liquipedia (CC BY-SA 3.0)") + " · logos © their owners"
                         color: root.bar ? root.bar.foreground : Color.popups.text
