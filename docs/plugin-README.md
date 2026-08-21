@@ -1,81 +1,77 @@
-# Esports — spoiler-free match schedule for the Omarchy bar
+# Esports
 
-A bar widget showing the next match for the teams you follow, with a dropdown
-listing what is live, what is coming, and what you still have to watch — and a
-spoiler blackout that is enforced by the daemon rather than by the UI.
+![Esports panel on the Omarchy bar](preview.png)
 
-![Esports widget](preview.png)
+A spoiler-free match schedule on the Omarchy bar. The next match for a team
+you follow sits on the chip with a countdown; click it for what is live, what
+is coming, and what you still have to watch.
 
 - **Next match on the bar** with a live countdown.
-- **Click a match** for an inline detail panel: full team names, kickoff, format,
-  stream links, VOD, and links to the relevant Liquipedia pages.
-- **Spoiler-free by construction.** Finished matches show the fixture and
-  nothing else until you reveal them. The score is not merely hidden — it is
-  absent from the file this widget reads.
-- **Catch-up masking.** If you are behind on a team's matches, their later
-  fixtures have the *opponent* withheld too, because knowing who they play next
-  tells you they won.
-- **Filter to your teams** with the ★ Mine toggle in the panel header.
-- Covers **Dota 2**, **Counter-Strike** and **StarCraft II** out of the box,
-  with 19 games verified and one command away.
+- **Click a match** for streams, the VOD, and Liquipedia pages.
+- **Spoiler-free by construction.** A result you have not revealed is absent
+  from the file this widget reads, not merely undrawn.
+- **Catch-up masking.** If you are behind on a team, later opponents are
+  withheld too — knowing who they play next tells you they won.
+- **★ Mine** filters the list to your teams.
+- **Dota 2**, **Counter-Strike** and **StarCraft II** out of the box; 37 games
+  verified and one toggle away.
+
+This plugin is the front end. It never talks to the network. The
+`omarchy-esports` daemon fetches, redacts, and notifies.
 
 ## Requires the daemon
 
-This plugin is the front end. It reads a state file and never touches the
-network. The `omarchy-esports` daemon does the fetching, the spoiler redaction
-and the notifications, and you need it for the widget to show anything:
+Until the daemon is running the widget shows a panel that names the repo.
 
-```bash
-git clone https://github.com/matt-shearing/omarchy-esports
+```sh
+git clone https://github.com/matt-shearing/omarchy-esports.git
 cd omarchy-esports && ./install.sh
 ```
 
-That also installs the companion app and a systemd user service. Until the
-daemon is running the widget shows a panel telling you so.
+That builds the daemon (Go is required), the companion app, and a user-session
+service. If this plugin is already a git checkout, `install.sh` leaves it
+alone. No sudo or pkexec is required.
 
 ## Install
 
-```bash
-omarchy plugin add https://github.com/matt-shearing/omarchy-esports-plugin --enable
+```sh
+omarchy plugin add https://github.com/matt-shearing/omarchy-esports-plugin.git --enable
 ```
+
+That clones the plugin and can place the widget on the left side of the bar.
 
 Or by hand:
 
-```bash
-git clone https://github.com/matt-shearing/omarchy-esports-plugin \
+```sh
+git clone https://github.com/matt-shearing/omarchy-esports-plugin.git \
   ~/.config/omarchy/plugins/contra.esports
 omarchy-shell shell rescanPlugins
 omarchy plugin enable contra.esports --section left
 ```
 
+Nothing in `~/.config` is rewritten except the bar layout entry Omarchy adds
+when you enable the plugin.
+
 ## Remove
 
-```bash
-omarchy plugin disable contra.esports
+```sh
 omarchy plugin remove contra.esports
 ```
 
-Or by hand:
+That leaves the daemon and its state. To uninstall those too, see
+[omarchy-esports](https://github.com/matt-shearing/omarchy-esports).
 
-```bash
-omarchy plugin disable contra.esports
-rm -r ~/.config/omarchy/plugins/contra.esports
-omarchy restart shell
-```
+## Requirements
 
-Removing the plugin leaves the daemon and its state alone. To remove those too:
-
-```bash
-systemctl --user disable --now omarchy-esports
-rm -r ~/.local/state/omarchy-esports ~/.config/omarchy-esports
-rm ~/.local/bin/omarchy-esports ~/.local/bin/omarchy-esports-app
-```
+- Omarchy Quattro with third-party shell plugins
+- The `omarchy-esports` daemon from the companion repo above
+- `go` to build the daemon
 
 ## Settings
 
 Widget options live on the bar entry in `~/.config/omarchy/shell.json`:
 
-```bash
+```sh
 omarchy bar set contra.esports showLabel false   # icon only
 omarchy bar set contra.esports maxRows 14        # rows in the dropdown
 omarchy bar set contra.esports showFinished false
@@ -94,6 +90,17 @@ instantiated once per monitor and an IPC target reaches only one of them, so an
 IPC binding opens the panel on the wrong screen. `shell toggle` routes through
 the bar, which picks the focused one.
 
+## Development
+
+```sh
+omarchy plugin validate .
+```
+
+Edits under `~/.config/omarchy/plugins/contra.esports/` reload in the running
+shell. Force a rescan with `omarchy-shell shell rescanPlugins` if a change does
+not appear.
+
 ## Licence
 
-MIT. Match data from [Liquipedia](https://liquipedia.net), CC BY-SA 3.0.
+MIT. Match data from [Liquipedia](https://liquipedia.net), CC BY-SA 3.0. See
+[LICENSE](LICENSE).

@@ -75,23 +75,10 @@ Option 1 is the default assumption of everything below.
 - [ ] No `curl | sh`, no unpinned remote code execution, no `NOPASSWD` sudoers
       rules, no PID files in shared `/tmp` — these trip the security scanner
 
-## The plugin id decision
+## The plugin id
 
-Currently `contra.esports`, which matches the other plugins on this machine
-(`contra.gpu`, `contra.media`) and passes the official validator, whose only
-real rules are `^[A-Za-z0-9][A-Za-z0-9._-]*$` and no `omarchy.` prefix.
-
-The marketplace *recommends* a namespaced form like
-`io.github.matt-shearing.esports`. Since ids are permanent, the trade-off is
-worth settling before submission:
-
-| | `contra.esports` | `io.github.matt-shearing.esports` |
-|---|---|---|
-| Matches local plugins | yes | no |
-| Collision risk in a global namespace | higher | effectively nil |
-| Marketplace convention | tolerated | recommended |
-
-Changing it later means a new listing, not a rename.
+`contra.esports`, matching `contra.keep-on` and `contra.layouts`. Ids are
+permanent; changing it later means a new listing, not a rename.
 
 ## Submission
 

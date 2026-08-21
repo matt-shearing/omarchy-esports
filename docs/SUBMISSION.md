@@ -5,21 +5,11 @@ submitted — two decisions are yours first.
 
 ## Decide first
 
-**1. The plugin id.** Currently `contra.esports`. Ids are permanent and
-globally unique across the whole catalog, and retired ids cannot be reused, so
-this is worth settling before submitting rather than after.
-
-| | `contra.esports` | `io.github.matt-shearing.esports` |
-|---|---|---|
-| Matches your other local plugins | yes | no |
-| Collision risk in a global namespace | higher | effectively nil |
-| Marketplace convention | tolerated | recommended |
-
-To change it, edit `id` in `plugin/contra.esports/manifest.json`, rename the
-directory, and re-run `./package-plugin.sh`.
+**1. The plugin id.** Settled: `contra.esports`. That matches `contra.keep-on`
+and `contra.layouts`, already on the catalog. Ids are permanent.
 
 **2. The contact address.** `contactEmail` in the config is sent to Liquipedia
-in the User-Agent on every request. See `TODO.md`.
+in the User-Agent on every request. See `TODO.md`. Not in the plugin repo.
 
 ## Publish the plugin repo
 
@@ -38,7 +28,7 @@ gh repo create omarchy-esports-plugin --public --source=. --push
 Then verify it installs the way a user would:
 
 ```bash
-omarchy plugin add https://github.com/matt-shearing/omarchy-esports-plugin --enable
+omarchy plugin add https://github.com/matt-shearing/omarchy-esports-plugin.git --enable
 ```
 
 ## Submit to the community catalog
@@ -88,6 +78,8 @@ Their scanner flags these. None are present, but worth knowing before editing:
 - no PID files in shared `/tmp`
 
 The packaged plugin is QML and a JSON manifest only — no scripts at all.
+Daemon uninstall lives in the companion repo README, not here, so the listing
+does not mention `systemctl`.
 
 ## After approval
 

@@ -23,23 +23,32 @@ mkdir -p "$BIN_DIR"
 log "Installing the bar plugin"
 mkdir -p "$PLUGIN_DIR"
 target="$PLUGIN_DIR/contra.esports"
-# Clear any previous install. Scoped to our own plugin directory, and only
-# when it is exactly that path.
-if [[ -L "$target" ]]; then
-  unlink "$target"
-elif [[ -d "$target" ]]; then
-  find "$target" -mindepth 1 -delete
-  rmdir "$target"
-fi
 
-# A symlink keeps a dev checkout live, but the shell's inotify watcher does not
-# follow symlinks, so edits then need `omarchy restart shell` rather than the
-# usual automatic reload. A copy is the better default for a plain install.
-if [[ "${DEV_LINK:-0}" == "1" ]]; then
-  ln -sfn "$REPO_DIR/plugin/contra.esports" "$target"
-  log "Linked plugin (dev mode) — reload edits with: omarchy restart shell"
+# A catalog install (`omarchy plugin add`) is a git checkout. Do not replace
+# that with a copy, or `omarchy plugin update` stops working.
+if [[ "${SKIP_PLUGIN:-0}" == "1" ]]; then
+  log "Skipping plugin (SKIP_PLUGIN=1)"
+elif [[ -e "$target/.git" && "${DEV_LINK:-0}" != "1" ]]; then
+  log "Plugin already installed from git at $target — leaving it"
 else
-  cp -r "$REPO_DIR/plugin/contra.esports" "$target"
+  # Clear any previous install. Scoped to our own plugin directory, and only
+  # when it is exactly that path.
+  if [[ -L "$target" ]]; then
+    unlink "$target"
+  elif [[ -d "$target" ]]; then
+    find "$target" -mindepth 1 -delete
+    rmdir "$target"
+  fi
+
+  # A symlink keeps a dev checkout live, but the shell's inotify watcher does
+  # not follow symlinks, so edits then need `omarchy restart shell` rather than
+  # the usual automatic reload. A copy is the better default for a plain install.
+  if [[ "${DEV_LINK:-0}" == "1" ]]; then
+    ln -sfn "$REPO_DIR/plugin/contra.esports" "$target"
+    log "Linked plugin (dev mode) — reload edits with: omarchy restart shell"
+  else
+    cp -r "$REPO_DIR/plugin/contra.esports" "$target"
+  fi
 fi
 
 log "Installing the app"

@@ -14,6 +14,13 @@
     "displayName": "Esports",
     "description": "Upcoming matches for the teams you follow, with stream links and spoiler-free VODs",
     "category": "Media",
+    "aliases": [
+      "matches",
+      "liquipedia",
+      "schedule",
+      "dota",
+      "cs2"
+    ],
     "allowMultiple": false,
     "defaultSection": "center",
     "defaults": {

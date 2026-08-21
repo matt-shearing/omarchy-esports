@@ -28,18 +28,9 @@ this file and in `docs/`.
 
 ## Publish to the plugin catalog
 
-Everything is prepared and nothing is submitted. `docs/SUBMISSION.md` has the
-exact commands, the field values, and the five form confirmations mapped to
-where each is already satisfied. Two decisions gate it: the plugin id (below)
-and the contact address (above).
-
-## Decide the published plugin id
-
-The plugin ships as `contra.esports`, matching your other local plugins. The
-community marketplace recommends a namespaced id such as
-`io.github.matt-shearing.esports`, and **plugin ids are permanent and globally
-unique once listed** — they cannot be reused after retirement. Worth settling
-before submitting, not after. See `docs/PUBLISHING.md`.
+Id settled as `contra.esports` (same namespace as Keep On and Persistent
+Layouts). Remaining work is the packaged repo, the public daemon repo, and the
+marketplace issue — see `docs/SUBMISSION.md`.
 
 ## Resolved
 

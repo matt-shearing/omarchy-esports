@@ -48,6 +48,14 @@ fi
 
 cp "$REPO_DIR/docs/plugin-README.md" "$OUT/README.md"
 
+cat > "$OUT/.gitignore" <<'EOF'
+.qmlc
+*.qmlc
+.DS_Store
+*.swp
+*~
+EOF
+
 log "Validating"
 if command -v omarchy-plugin-validate >/dev/null; then
   omarchy-plugin-validate "$OUT"

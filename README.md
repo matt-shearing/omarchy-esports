@@ -43,7 +43,29 @@ omarchy-esports status
 `install.sh` builds the binary into `~/.local/bin`, installs the bar plugin,
 enables a systemd user service for the daemon, and adds the widget to your bar.
 Use `DEV_LINK=1 ./install.sh` to symlink the plugin from a working copy instead
-of copying it.
+of copying it. If the plugin is already a git checkout from
+`omarchy plugin add`, the installer leaves that checkout alone.
+
+The bar widget is also a standalone repo so the catalog's
+`omarchy plugin add` works (it only reads `manifest.json` at the repository
+root):
+
+```bash
+omarchy plugin add https://github.com/matt-shearing/omarchy-esports-plugin.git --enable
+```
+
+You still need this repo — the daemon — for the widget to show anything.
+
+### Uninstall
+
+```bash
+omarchy plugin remove contra.esports
+systemctl --user disable --now omarchy-esports
+rm -r ~/.local/state/omarchy-esports ~/.config/omarchy-esports
+rm ~/.local/bin/omarchy-esports ~/.local/bin/omarchy-esports-app
+rm -r ~/.local/share/omarchy-esports
+rm ~/.local/share/applications/omarchy-esports.desktop
+```
 
 ### Keybindings
 
