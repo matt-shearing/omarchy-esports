@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "contra.esports",
   "name": "Esports",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "contra",
-  "description": "Spoiler-free esports schedule with streams and VODs",
+  "description": "Spoiler-free match schedule for the Omarchy bar. The next match for a team you follow sits on the chip with a countdown; click for what is live, coming, and still to watch. Scores are withheld by a daemon rather than merely undrawn. Dota 2, Counter-Strike and StarCraft II out of the box; 37 games one toggle away. Requires the omarchy-esports daemon.",
   "license": "MIT",
   "kinds": ["bar-widget"],
   "entryPoints": {
@@ -12,7 +12,7 @@
   },
   "barWidget": {
     "displayName": "Esports",
-    "description": "Upcoming matches for the teams you follow, with stream links and spoiler-free VODs",
+    "description": "Upcoming matches for the teams you follow, with stream links and spoiler-free VODs. Requires the omarchy-esports daemon.",
     "category": "Media",
     "aliases": [
       "matches",
