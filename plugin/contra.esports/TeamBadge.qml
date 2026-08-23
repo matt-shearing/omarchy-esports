@@ -48,6 +48,7 @@ RowLayout {
             opacity: badge.hidden ? 0.35 : 1.0
 
             Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: badge.hidden ? "?" : Model.initialsFor(badge.opponent)
                 color: badge.fg
@@ -60,6 +61,7 @@ RowLayout {
     }
 
     Text {
+        textFormat: Text.PlainText
         Layout.alignment: Qt.AlignVCenter
         text: Model.opponentLabel(badge.opponent)
         color: badge.fg

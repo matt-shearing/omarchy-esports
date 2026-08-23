@@ -113,7 +113,7 @@ func (c *Client) Videos(ctx context.Context, channelID string) ([]Video, error) 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "omarchy-esports (+https://github.com/contra/omarchy-esports)")
+	req.Header.Set("User-Agent", "omarchy-esports (+https://github.com/matt-shearing/omarchy-esports)")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

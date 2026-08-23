@@ -143,8 +143,9 @@ Panel {
     }
 
     function openUrl(url) {
-        if (!url) return
-        Qt.openUrlExternally(url)
+        var u = Model.safeExternalUrl(url)
+        if (!u) return
+        Qt.openUrlExternally(u)
         root.close()
     }
 
@@ -173,15 +174,11 @@ Panel {
     function activate(m) {
         if (!m) return
         if (m.vod && m.vod.url) {
-            Qt.openUrlExternally(m.vod.url)
-            root.close()
+            root.openUrl(m.vod.url)
             return
         }
         var s = Model.preferredStream(m)
-        if (s && s.url) {
-            Qt.openUrlExternally(s.url)
-            root.close()
-        }
+        if (s && s.url) root.openUrl(s.url)
     }
 
     onOpenedChanged: if (opened) {
@@ -282,6 +279,7 @@ Panel {
                     // the slack, but shrinkable, so a narrow panel elides this
                     // note instead of pushing the buttons off the right edge.
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         Layout.maximumWidth: implicitWidth
                         visible: root.model.spoilers !== "off"
@@ -332,6 +330,7 @@ Panel {
 
                 // Empty / error states
                 Text {
+                    textFormat: Text.PlainText
                     visible: !root.model.ok
                     Layout.fillWidth: true
                     text: "Waiting for the esports daemon.\n\nIf it is installed:  omarchy-esports refresh\nIf not:  github.com/matt-shearing/omarchy-esports"
@@ -343,6 +342,7 @@ Panel {
                 }
 
                 Text {
+                    textFormat: Text.PlainText
                     visible: root.model.ok && root.groups.length === 0
                     Layout.fillWidth: true
                     text: {
@@ -385,6 +385,7 @@ Panel {
                         visible: visibleMatches.length > 0
 
                         Text {
+                            textFormat: Text.PlainText
                             text: modelData.header
                             color: modelData.kind === "live"
                                 ? (root.bar ? root.bar.urgent : Color.accent)
@@ -443,6 +444,7 @@ Panel {
                     // not fill, so left alone this one line set the panel's
                     // minimum width and pushed the list past the card edge.
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: (root.model.attribution !== "" ? root.model.attribution
                             : "Data via Liquipedia (CC BY-SA 3.0)") + " · logos © their owners"

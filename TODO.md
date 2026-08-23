@@ -18,8 +18,7 @@ worth doing before the catch-up queue is tuned around teams you do not watch.
   every request.
 - Plugin id is `contra.esports`, matching your other local plugins. Ids are
   permanent once listed, so this is now fixed.
-- Publishing is prepared and not submitted — `docs/SUBMISSION.md` has the exact
-  commands, field values, and the five form confirmations mapped to where each
-  is already satisfied. Both gating decisions above are now made.
+- Listed on the Omarchy plugin catalog. Daemon feed is treated as untrusted in
+  the bar widget (plain text, checked external URLs).
 - The stray `gamerlegion` follow-list entry is gone. The org is followed as
   `{"name": "GamerLegion", "wiki": "dota2"}` — their Dota roster only.

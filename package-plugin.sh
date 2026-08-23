@@ -27,8 +27,14 @@ log "Syncing shared sources"
 "$REPO_DIR/sync-shared.sh" >/dev/null
 
 log "Building $PLUGIN_ID $VERSION into $OUT"
-if [[ -d "$OUT" ]]; then
-  find "$OUT" -mindepth 1 -delete
+if [[ -d "$OUT/.git" ]]; then
+  # Keep an existing plugin-repo checkout so republishing is `git push`.
+  find "$OUT" -mindepth 1 \( -name '.git' -o -path "$OUT/.git/*" \) -prune -o -exec rm -rf {} +
+else
+  if [[ -d "$OUT" ]]; then
+    find "$OUT" -mindepth 1 -delete
+  fi
+  mkdir -p "$OUT"
 fi
 mkdir -p "$OUT"
 
@@ -47,6 +53,14 @@ else
 fi
 
 cp "$REPO_DIR/docs/plugin-README.md" "$OUT/README.md"
+
+cat > "$OUT/.gitignore" <<'EOF'
+.qmlc
+*.qmlc
+.DS_Store
+*.swp
+*~
+EOF
 
 log "Validating"
 if command -v omarchy-plugin-validate >/dev/null; then

@@ -101,6 +101,7 @@ Rectangle {
                 spacing: 0
 
                 Text {
+                    textFormat: Text.PlainText
                     text: row.live ? "LIVE" : (row.finished ? "" : Model.clockTime(row.match))
                     color: row.live ? (row.bar ? row.bar.urgent : Color.accent) : row.fg
                     font.family: row.bar ? row.bar.fontFamily : Style.font.family
@@ -108,6 +109,7 @@ Rectangle {
                     font.bold: row.live
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: !row.live && !row.finished
                     text: Model.countdown(row.match, row.nowMs)
                     color: row.fg
@@ -116,6 +118,7 @@ Rectangle {
                     font.pixelSize: Style.font.caption
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: row.finished
                     text: Model.hasVod(row.match) ? "VOD" : "done"
                     color: row.fg
@@ -137,6 +140,7 @@ Rectangle {
                 }
 
                 Text {
+                    textFormat: Text.PlainText
                     text: Model.scoreLabel(row.match) !== "" ? Model.scoreLabel(row.match) : "v"
                     color: row.fg
                     opacity: 0.45
@@ -166,6 +170,7 @@ Rectangle {
                 spacing: 0
 
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: row.match ? Model.truncate(row.match.tournament.name, 28) : ""
                     color: row.fg
@@ -204,6 +209,7 @@ Rectangle {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         text: {
                             if (!row.match) return ""
                             var bits = []
@@ -222,6 +228,7 @@ Rectangle {
             }
 
             Text {
+                textFormat: Text.PlainText
                 Layout.alignment: Qt.AlignVCenter
                 text: {
                     if (row.masked) return "󰛑"
@@ -254,6 +261,7 @@ Rectangle {
             }
 
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: {
                     if (!row.match) return ""
@@ -283,6 +291,7 @@ Rectangle {
                         spacing: Style.space(10)
 
                         Text {
+                            textFormat: Text.PlainText
                             Layout.preferredWidth: row.gutter
                             Layout.alignment: Qt.AlignTop
                             text: fact.modelData.label
@@ -293,6 +302,7 @@ Rectangle {
                         }
 
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: fact.modelData.value
                             color: row.fg
@@ -307,6 +317,7 @@ Rectangle {
 
             // Explains a blackout instead of leaving the user guessing.
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: row.masked || row.blacked
                 text: row.masked ? Model.maskExplanation(row.match)

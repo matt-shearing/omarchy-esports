@@ -1,6 +1,6 @@
 [Unit]
 Description=Omarchy esports schedule daemon
-Documentation=https://github.com/contra/omarchy-esports
+Documentation=https://github.com/matt-shearing/omarchy-esports
 # Notifications need a session bus. Without one the daemon still runs and
 # still maintains state; it just cannot raise desktop notifications.
 After=graphical-session.target
