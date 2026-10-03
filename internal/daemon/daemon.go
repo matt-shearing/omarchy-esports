@@ -646,7 +646,16 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 					return false // stop the whole sweep, not just this file
 				}
 				if errors.Is(err, liquipedia.ErrNotFound) {
+					// Drop just the dead variant: the other one (usually the
+					// light logo) still serves both themes, and the dead URL
+					// is never retried.
 					gone = true
+					if l.Light == remote {
+						l.Light = ""
+					}
+					if l.Dark == remote {
+						l.Dark = ""
+					}
 				}
 				d.logger.Printf("logo cache: %v", err)
 				continue
@@ -707,7 +716,9 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 		if e.Logo.Light == "" && e.Logo.Dark == "" {
 			continue
 		}
-		if strings.HasPrefix(e.Logo.Light, "file://") {
+		// Skip only when both variants are already local; a team with a
+		// cached light logo can still carry a dead dark URL.
+		if strings.HasPrefix(e.Logo.Light, "file://") && (e.Logo.Dark == "" || strings.HasPrefix(e.Logo.Dark, "file://")) {
 			continue
 		}
 		if localise(&e.Logo) && e.Logo.Local == "" {

@@ -302,6 +302,9 @@ func (c *LogoCache) download(ctx context.Context, rawURL, path, userAgent string
 		c.mu.Unlock()
 		return "", ErrBackoff
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("logo %s: %w", rawURL, ErrNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("logo %s: %s", rawURL, resp.Status)
 	}
