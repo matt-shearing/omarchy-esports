@@ -579,6 +579,24 @@ function vodSections(matches, opts) {
   return { queue: queue, rest: rest }
 }
 
+// vodTabFor decides which of the two VOD tabs to show.
+//
+// The two lists answer different questions and are ordered in opposite
+// directions — the catch-up queue runs oldest first because watching out of
+// order is what spoils a bracket, while the archive runs newest first. Stacking
+// them put the newest recordings below the entire backlog, which is the wrong
+// way round for the commoner question of "what just got uploaded".
+//
+// An explicit choice is always honoured, including onto an empty list, because
+// silently bouncing someone off the tab they just clicked is worse than an
+// empty state that explains itself. Only the unset case picks a side, and it
+// prefers the queue: a backlog is time-sensitive in a way the archive is not.
+function vodTabFor(sections, preferred) {
+  if (preferred === "catchup" || preferred === "recent") return preferred
+  var queue = (sections && sections.queue) || []
+  return queue.length > 0 ? "catchup" : "recent"
+}
+
 // tournamentsWithVods lists the tournaments that have recordings, so the VODs
 // view can offer them as a filter.
 function tournamentsWithVods(matches) {
@@ -744,6 +762,95 @@ function parseConfig(text) {
   } catch (e) {
     return empty
   }
+}
+
+// parseGames decodes games.json defensively.
+function parseGames(text) {
+  if (!text || !String(text).trim()) return []
+  try {
+    var doc = JSON.parse(text)
+    return Array.isArray(doc.games) ? doc.games : []
+  } catch (e) {
+    return []
+  }
+}
+
+// gameIconFor returns a local artwork path for a game, or "".
+//
+// Empty is the normal answer for a game with no curated source, or one whose
+// artwork has not been fetched yet, so every caller must have a text fallback.
+function gameIconFor(games, slug) {
+  if (!games || !games.length || !slug) return ""
+  var want = String(slug).toLowerCase().trim()
+  for (var i = 0; i < games.length; i++) {
+    if (String(games[i].slug || "").toLowerCase() === want) {
+      return String(games[i].icon || "")
+    }
+  }
+  return ""
+}
+
+// gameIconForMatch is gameIconFor keyed off a fixture's wiki.
+function gameIconForMatch(games, match) {
+  return match ? gameIconFor(games, match.wiki) : ""
+}
+
+// parseProfiles decodes profiles.json defensively.
+function parseProfiles(text) {
+  if (!text || !String(text).trim()) return []
+  try {
+    var doc = JSON.parse(text)
+    if (!Array.isArray(doc.profiles)) return []
+    // The daemon omits empty lists, so a profile with no roster arrives with
+    // no roster *key* at all. Every reader then has to guard before touching
+    // .length, and one that forgets takes the whole view down with it — a
+    // failed binding renders nothing, so a missing roster would blank the
+    // fixtures and recordings alongside it. Normalise once, here.
+    for (var i = 0; i < doc.profiles.length; i++) {
+      var p = doc.profiles[i]
+      if (!Array.isArray(p.roster)) p.roster = []
+      if (!Array.isArray(p.fields)) p.fields = []
+    }
+    return doc.profiles
+  } catch (e) {
+    return []
+  }
+}
+
+// profileFor finds a team's cached profile.
+//
+// Profiles are per wiki, because an org's Dota 2 and Counter-Strike pages are
+// separate pages with separate rosters. Asking without a wiki takes whichever
+// is cached, which is what the follow list does when a team is followed across
+// every game.
+function profileFor(profiles, name, wiki) {
+  if (!profiles || !profiles.length) return null
+  var n = String(name || "").toLowerCase().trim()
+  if (!n) return null
+  var scope = String(wiki || "").toLowerCase().trim()
+  var loose = null
+  for (var i = 0; i < profiles.length; i++) {
+    var p = profiles[i]
+    if (String(p.name || "").toLowerCase().trim() !== n) continue
+    if (!scope) return p
+    if (String(p.wiki || "").toLowerCase() === scope) return p
+    if (!loose) loose = p
+  }
+  return scope ? null : loose
+}
+
+// teamVods lists a team's watchable recordings, newest first.
+//
+// Drawn from the same redacted matches the rest of the UI reads, so a fixture
+// the catch-up queue has masked arrives here already masked — the profile page
+// cannot become a way around the blackout.
+function teamVods(matches, teamName, wiki) {
+  var past = teamMatches(matches, teamName, wiki).past
+  var out = []
+  for (var i = 0; i < past.length; i++) {
+    if (hasVod(past[i])) out.push(past[i])
+  }
+  return out
 }
 
 // parseTeamIndex decodes teams.json defensively.

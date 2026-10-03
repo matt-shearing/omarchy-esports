@@ -569,3 +569,20 @@ redistributed as part of this software. Their use here does not imply
 endorsement by, or affiliation with, the teams, the organisations, or
 Liquipedia. If you are a rights holder and want a logo removed, please open an
 issue.
+
+### Recovering older VODs
+
+A YouTube channel's RSS feed carries only its ~15 most recent uploads. During a
+large event that is well under a day — the official Dota 2 channel posts every
+game of every series in four languages — so a fixture played on Tuesday has
+scrolled out of the feed by Thursday and can never be matched from the feed
+alone.
+
+If [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) is on `PATH`, the daemon reads
+each broadcast channel's video tab directly and recovers those older uploads.
+It runs at most once a day per channel, and only while some finished fixture
+still has no VOD. Every video it has ever seen is remembered, so a VOD stays
+findable long after it leaves the feed.
+
+Without `yt-dlp` everything still works; the reach is just the feed window.
+Turn it off with `youtube.backfill: false` in the config.

@@ -77,13 +77,49 @@ type Private struct {
 	// an endpoint that had just asked us to stop, which is the surest way to
 	// turn a short throttle into a long one.
 	LogoBackoffUntil time.Time `json:"logoBackoffUntil,omitempty"`
+	// Videos is every YouTube upload ever seen, keyed by video id.
+	//
+	// The RSS feed only carries a channel's ~15 most recent uploads, which
+	// during a big event is a few days at most — the official Dota channel
+	// posts every match in four languages, so a fixture from Tuesday has
+	// scrolled out by Thursday. Remembering what we have seen turns a rolling
+	// window into an accumulating index, so a VOD stays findable long after it
+	// leaves the feed.
+	Videos map[string]StoredVideo `json:"videos"`
+	// VideoSweeps records when each channel was last enumerated with the
+	// backfiller. That walk is far more expensive than an RSS poll, so it runs
+	// on a long cooldown and only when something is actually missing.
+	VideoSweeps map[string]time.Time `json:"videoSweeps,omitempty"`
 	// DirectorySweeps records when each wiki's team directory was last
 	// enumerated, so a sweep is not repeated on every refresh.
 	DirectorySweeps map[string]time.Time `json:"directorySweeps"`
+	// TeamProfiles caches what a team's own Liquipedia page says about the
+	// organisation and its roster, keyed by "<wiki>/<lowercased name>".
+	//
+	// Each entry costs one action=parse, the most rate-limited call the daemon
+	// makes, so these are fetched only for followed teams and refreshed
+	// weekly.
+	TeamProfiles map[string]TeamProfile `json:"teamProfiles,omitempty"`
+	// ProfileRetryAfter holds off a team page that failed or parsed to
+	// nothing. Without it a title that 404s is retried every single refresh,
+	// and since each attempt blocks for a thirty-second rate-limit slot before
+	// the request is even sent, a handful of broken targets turns polling into
+	// a permanent fetch loop.
+	ProfileRetryAfter map[string]time.Time `json:"profileRetryAfter,omitempty"`
 	// TournamentStreams caches broadcast channels discovered from tournament
 	// pages, keyed by tournament page path. These are expensive to fetch
 	// (one rate-limited parse each) and change rarely.
 	TournamentStreams map[string]TournamentInfo `json:"tournamentStreams"`
+}
+
+// StoredVideo is one remembered upload.
+type StoredVideo struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Channel   string    `json:"channel,omitempty"`
+	Published time.Time `json:"published"`
+	Thumbnail string    `json:"thumbnail,omitempty"`
+	Lang      string    `json:"lang,omitempty"`
 }
 
 // TeamEntry is one team in one game.
@@ -189,6 +225,7 @@ func (s *Store) LoadPrivate() (Private, error) {
 		Watched:           map[string]bool{},
 		Notified:          map[string]time.Time{},
 		Teams:             map[string]TeamEntry{},
+		Videos:            map[string]StoredVideo{},
 		DirectorySweeps:   map[string]time.Time{},
 		TournamentStreams: map[string]TournamentInfo{},
 	}
@@ -208,6 +245,7 @@ func (s *Store) LoadPrivate() (Private, error) {
 			Watched:           map[string]bool{},
 			Notified:          map[string]time.Time{},
 			Teams:             map[string]TeamEntry{},
+			Videos:            map[string]StoredVideo{},
 			DirectorySweeps:   map[string]time.Time{},
 			TournamentStreams: map[string]TournamentInfo{},
 		}, nil
@@ -223,6 +261,9 @@ func (s *Store) LoadPrivate() (Private, error) {
 	}
 	if p.DirectorySweeps == nil {
 		p.DirectorySweeps = map[string]time.Time{}
+	}
+	if p.Videos == nil {
+		p.Videos = map[string]StoredVideo{}
 	}
 	if p.Notified == nil {
 		p.Notified = map[string]time.Time{}
@@ -321,6 +362,88 @@ func (s *Store) SaveTeams(teams []TeamEntry) error {
 	return writeJSON(s.TeamsPath(), map[string]any{
 		"version": CurrentVersion,
 		"teams":   teams,
+	}, 0o644)
+}
+
+// TeamProfile is a cached team page.
+//
+// The field list is deliberately open rather than a fixed struct: the infobox
+// template differs per wiki, so Counter-Strike pages carry "In-Game Leader"
+// and "Games" where Dota 2 pages carry "Team Captain" and "Director".
+type TeamProfile struct {
+	FetchedAt time.Time       `json:"fetchedAt"`
+	Name      string          `json:"name"`
+	Wiki      string          `json:"wiki"`
+	Game      string          `json:"game,omitempty"`
+	Page      string          `json:"page,omitempty"`
+	Fields    []ProfileField  `json:"fields,omitempty"`
+	Roster    []ProfilePlayer `json:"roster,omitempty"`
+}
+
+// ProfileField is one infobox row.
+type ProfileField struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// ProfilePlayer is one member of a team's active roster.
+type ProfilePlayer struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Position string `json:"position,omitempty"`
+	Joined   string `json:"joined,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Captain  bool   `json:"captain,omitempty"`
+	Page     string `json:"page,omitempty"`
+}
+
+// ProfilesPath is the world-readable file the UI reads team profiles from.
+func (s *Store) ProfilesPath() string { return filepath.Join(s.dir, "profiles.json") }
+
+// SaveProfiles publishes team profiles.
+//
+// Kept out of state.json because profiles change weekly while matches change
+// every few minutes, and out of teams.json because that file is a directory of
+// several thousand names the UI loads to power search.
+func (s *Store) SaveProfiles(profiles []TeamProfile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sort.SliceStable(profiles, func(i, j int) bool {
+		if profiles[i].Name != profiles[j].Name {
+			return profiles[i].Name < profiles[j].Name
+		}
+		return profiles[i].Wiki < profiles[j].Wiki
+	})
+	return writeJSON(s.ProfilesPath(), map[string]any{
+		"version":  CurrentVersion,
+		"profiles": profiles,
+	}, 0o644)
+}
+
+// PublicGame is one game in the catalog, with its artwork resolved to a local
+// path when we hold it.
+type PublicGame struct {
+	Slug    string `json:"slug"`
+	Game    string `json:"game"`
+	Short   string `json:"short,omitempty"`
+	Enabled bool   `json:"enabled"`
+	// Icon is a file:// URL for artwork already on this machine. Empty means
+	// the UI falls back to the short text badge, which is always available.
+	Icon string `json:"icon,omitempty"`
+}
+
+// GamesPath is the world-readable file the UI reads the game catalog from.
+func (s *Store) GamesPath() string { return filepath.Join(s.dir, "games.json") }
+
+// SaveGames publishes the catalog. Game names and artwork reveal no results,
+// so nothing here is redacted.
+func (s *Store) SaveGames(games []PublicGame) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sort.SliceStable(games, func(i, j int) bool { return games[i].Game < games[j].Game })
+	return writeJSON(s.GamesPath(), map[string]any{
+		"version": CurrentVersion,
+		"games":   games,
 	}, 0o644)
 }
 

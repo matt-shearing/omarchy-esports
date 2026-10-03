@@ -14,6 +14,7 @@ Item {
 
     property var config: null
     property var teamIndex: []
+    property var games: []
     property var followed: []
     property int step: 0
 
@@ -156,6 +157,7 @@ Item {
                             delegate: GameChip {
                                 required property var modelData
                                 wiki: modelData
+                                icon: Model.gameIconFor(wizard.games, modelData.slug)
                                 enabled_: modelData.enabled === true
                                 onToggled: wizard.applyWiki(modelData.slug, !(modelData.enabled === true))
                             }

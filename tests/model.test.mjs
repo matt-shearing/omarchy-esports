@@ -131,6 +131,21 @@ check("vodSections filters by followed team and tournament", () => {
   eq(Model.vodSections(matches, { tournament: "EWC" }).queue.length, 1);
 });
 
+check("vodTabFor defaults to the backlog when there is one", () => {
+  eq(Model.vodTabFor({ queue: [1], rest: [2, 3] }, ""), "catchup");
+  eq(Model.vodTabFor({ queue: [], rest: [2, 3] }, ""), "recent");
+  // Nothing anywhere still has to name a tab to render.
+  eq(Model.vodTabFor({ queue: [], rest: [] }, ""), "recent");
+  eq(Model.vodTabFor(undefined, ""), "recent");
+});
+
+check("vodTabFor honours an explicit choice onto an empty list", () => {
+  // Bouncing someone off the tab they just clicked is worse than an empty
+  // state that explains itself and points at the other tab.
+  eq(Model.vodTabFor({ queue: [], rest: [1] }, "catchup"), "catchup");
+  eq(Model.vodTabFor({ queue: [1], rest: [] }, "recent"), "recent");
+});
+
 // --- monograms -----------------------------------------------------------
 check("initialsFor prefers the team's own tag", () => {
   // The ticker abbreviation wins when we have it.
@@ -235,6 +250,84 @@ check("parseState survives junk", () => {
   eq(Model.parseState("").matches, []);
   eq(Model.parseState("{oops").matches, []);
   ok(!Model.parseState("").ok);
+});
+
+// --- game artwork --------------------------------------------------------
+check("gameIconFor resolves artwork and falls back to nothing", () => {
+  const games = [
+    { slug: "dota2", game: "Dota 2", short: "DOTA", icon: "file:///cache/dota.png" },
+    { slug: "counterstrike", game: "Counter-Strike", short: "CS2", icon: "" },
+  ];
+  eq(Model.gameIconFor(games, "dota2"), "file:///cache/dota.png");
+  eq(Model.gameIconFor(games, "DOTA2"), "file:///cache/dota.png", "slug match is case-insensitive:");
+  // A game with no curated source, or artwork not yet downloaded, is normal —
+  // every caller falls back to the short text badge.
+  eq(Model.gameIconFor(games, "counterstrike"), "");
+  eq(Model.gameIconFor(games, "valorant"), "");
+  eq(Model.gameIconFor([], "dota2"), "");
+  eq(Model.gameIconFor(games, ""), "");
+});
+
+check("gameIconForMatch keys off the fixture's wiki", () => {
+  const games = [{ slug: "dota2", icon: "file:///cache/dota.png" }];
+  eq(Model.gameIconForMatch(games, { wiki: "dota2" }), "file:///cache/dota.png");
+  eq(Model.gameIconForMatch(games, { wiki: "valorant" }), "");
+  eq(Model.gameIconForMatch(games, null), "");
+});
+
+check("parseGames survives junk", () => {
+  eq(Model.parseGames("").length, 0);
+  eq(Model.parseGames("{").length, 0);
+  eq(Model.parseGames('{"games":"nope"}').length, 0);
+  eq(Model.parseGames('{"games":[{"slug":"dota2"}]}').length, 1);
+});
+
+// --- team profiles -------------------------------------------------------
+check("profileFor matches on name and game scope", () => {
+  const profiles = [
+    { name: "Team Falcons", wiki: "dota2", roster: [{ id: "skiter" }] },
+    { name: "Team Falcons", wiki: "counterstrike", roster: [{ id: "karrigan" }] },
+  ];
+  eq(Model.profileFor(profiles, "Team Falcons", "counterstrike").roster[0].id, "karrigan");
+  eq(Model.profileFor(profiles, "team falcons", "dota2").roster[0].id, "skiter",
+     "matching is case-insensitive:");
+  // An org followed across every game has no wiki to ask with.
+  eq(Model.profileFor(profiles, "Team Falcons", "").wiki, "dota2", "unscoped takes the first:");
+  // A scoped ask must not fall back to another game's roster.
+  eq(Model.profileFor(profiles, "Team Falcons", "valorant"), null, "wrong game:");
+  eq(Model.profileFor(profiles, "Nobody", "dota2"), null);
+  eq(Model.profileFor([], "Team Falcons", "dota2"), null);
+});
+
+check("teamVods only lists recordings and stays inside the redaction", () => {
+  const matches = [
+    { state: "finished", wiki: "dota2", startsAt: "2026-01-01T00:00:00Z", tournament: {},
+      opponents: [{ name: "Team Falcons" }, { name: "OG" }], vod: { videoId: "a" } },
+    { state: "finished", wiki: "dota2", startsAt: "2026-01-02T00:00:00Z", tournament: {},
+      opponents: [{ name: "Team Falcons" }, { name: "OG" }] },
+    { state: "upcoming", wiki: "dota2", startsAt: "2026-02-01T00:00:00Z", tournament: {},
+      opponents: [{ name: "Team Falcons" }, { name: "OG" }], vod: { videoId: "b" } },
+  ];
+  const got = Model.teamVods(matches, "Team Falcons", "dota2");
+  eq(got.length, 1, "only finished matches with a vod:");
+  eq(got[0].vod.videoId, "a");
+});
+
+check("parseProfiles survives junk", () => {
+  eq(Model.parseProfiles("").length, 0);
+  eq(Model.parseProfiles("{").length, 0);
+  eq(Model.parseProfiles('{"profiles":"nope"}').length, 0);
+  eq(Model.parseProfiles('{"profiles":[{"name":"X"}]}').length, 1);
+  // The daemon omits empty lists, so a roster-less profile arrives with no
+  // roster key. Readers dereference .length directly, and in QML a failed
+  // binding renders nothing at all — a missing roster would blank the whole
+  // team detail view, fixtures and recordings included.
+  const bare = Model.parseProfiles('{"profiles":[{"name":"X"}]}')[0];
+  eq(Array.isArray(bare.roster), true, "roster normalised:");
+  eq(bare.roster.length, 0);
+  eq(Array.isArray(bare.fields), true, "fields normalised:");
+  eq(Model.parseProfiles('{"profiles":[{"name":"X","roster":"nope"}]}')[0].roster.length, 0,
+     "a non-array roster is replaced:");
 });
 
 console.log(failures === 0 ? "\nall passed" : `\n${failures} failed`);

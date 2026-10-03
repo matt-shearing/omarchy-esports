@@ -11,6 +11,7 @@ ScrollView {
 
     property var config: null
     property var teamIndex: []
+    property var games: []
 
     signal apply(string key, string value)
     signal applyWiki(string slug, bool on)
@@ -133,6 +134,7 @@ ScrollView {
                 delegate: GameChip {
                     required property var modelData
                     wiki: modelData
+                    icon: Model.gameIconFor(view.games, modelData.slug)
                     enabled_: modelData.enabled === true
                     onToggled: view.applyWiki(modelData.slug, !(modelData.enabled === true))
                 }

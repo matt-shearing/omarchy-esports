@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ type Daemon struct {
 	cfg      config.Config
 	lp       *liquipedia.Client
 	yt       *youtube.Client
+	ytBack   *youtube.Backfiller
 	store    *store.Store
 	notifier *notify.Sender
 	logger   *log.Logger
@@ -81,6 +83,7 @@ func New(o Options) *Daemon {
 		lp:                   liquipedia.New(o.Version, o.Config.ContactEmail, store.CacheDir()),
 		logos:                liquipedia.NewLogoCache(store.CacheDir()),
 		yt:                   youtube.New(15 * time.Minute),
+		ytBack:               youtube.NewBackfiller(0),
 		store:                o.Store,
 		notifier:             notifier,
 		logger:               logger,
@@ -194,8 +197,10 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 
 	d.indexTeams(all, &priv)
 	d.sweepDirectories(ctx, &priv)
+	d.fetchTeamProfiles(ctx, &priv)
 	d.fetchMissingLogos(ctx, &priv)
 	d.cacheLogos(ctx, all, &priv)
+	d.cacheGameIcons(ctx)
 
 	priv.Matches = all
 	priv.UpdatedAt = time.Now()
@@ -212,6 +217,12 @@ func (d *Daemon) RefreshOnce(ctx context.Context) error {
 	}
 	if err := d.publishTeams(priv); err != nil {
 		d.logger.Printf("writing team index: %v", err)
+	}
+	if err := d.publishProfiles(priv); err != nil {
+		d.logger.Printf("writing team profiles: %v", err)
+	}
+	if err := d.publishGames(); err != nil {
+		d.logger.Printf("writing game catalog: %v", err)
 	}
 	return d.publish(priv, errs)
 }
@@ -767,6 +778,290 @@ func (d *Daemon) publishTeams(priv store.Private) error {
 	return d.store.SaveTeams(out)
 }
 
+const (
+	// profileTTL is how long a cached team page stays fresh. Rosters change on
+	// transfer-window timescales, not hourly.
+	profileTTL = 7 * 24 * time.Hour
+	// maxProfileFetches bounds how many team pages one refresh may fetch. Each
+	// is an action=parse and therefore a thirty-second rate-limit slot, shared
+	// with the tickers and tournament pages that the schedule itself depends
+	// on. Two per refresh fills a follow list within a few cycles without ever
+	// making the schedule wait on it.
+	//
+	// This counts attempts, not successes. Counting successes would let a
+	// failing target slip through the cap for free, and the cost being bounded
+	// here is the rate-limit slot, which a failed request spends in full.
+	maxProfileFetches = 2
+	// profileRetry is how long a team page that failed or parsed to nothing is
+	// left alone before being tried again.
+	profileRetry = 24 * time.Hour
+)
+
+// profileTargets lists the (team, wiki) pairs worth holding a profile for.
+//
+// Only followed teams. Fetching a profile for whatever team is on screen would
+// put a thirty-second rate-limited call behind a search result, and browsing
+// the index would walk straight into the limiter.
+func (d *Daemon) profileTargets(priv *store.Private) []store.TeamEntry {
+	var out []store.TeamEntry
+	seen := map[string]bool{}
+	add := func(e store.TeamEntry) {
+		if e.Name == "" || e.Wiki == "" || seen[e.Key] {
+			return
+		}
+		seen[e.Key] = true
+		out = append(out, e)
+	}
+	for _, follow := range d.cfg.Teams {
+		name := strings.TrimSpace(follow.Name)
+		if name == "" {
+			continue
+		}
+		for _, e := range priv.Teams {
+			if !strings.EqualFold(strings.TrimSpace(e.Name), name) {
+				continue
+			}
+			// An unscoped follow covers every game, so it wants a profile per
+			// wiki the org actually fields a roster in — they are different
+			// pages with different rosters.
+			if follow.Wiki != "" && !strings.EqualFold(follow.Wiki, e.Wiki) {
+				continue
+			}
+			if !d.cfg.WikiEnabled(e.Wiki) {
+				continue
+			}
+			add(e)
+		}
+	}
+	return out
+}
+
+// fetchTeamProfiles keeps profiles for followed teams current.
+func (d *Daemon) fetchTeamProfiles(ctx context.Context, priv *store.Private) {
+	if priv.TeamProfiles == nil {
+		priv.TeamProfiles = map[string]store.TeamProfile{}
+	}
+	targets := d.profileTargets(priv)
+
+	// Drop profiles for teams no longer followed, so unfollowing actually
+	// reclaims the space rather than leaving the page behind.
+	wanted := map[string]bool{}
+	for _, t := range targets {
+		wanted[t.Key] = true
+	}
+	for key := range priv.TeamProfiles {
+		if !wanted[key] {
+			delete(priv.TeamProfiles, key)
+		}
+	}
+
+	if priv.ProfileRetryAfter == nil {
+		priv.ProfileRetryAfter = map[string]time.Time{}
+	}
+	for key := range priv.ProfileRetryAfter {
+		if !wanted[key] {
+			delete(priv.ProfileRetryAfter, key)
+		}
+	}
+
+	attempts := 0
+	for _, t := range targets {
+		if attempts >= maxProfileFetches {
+			break
+		}
+		if p, ok := priv.TeamProfiles[t.Key]; ok && time.Since(p.FetchedAt) < profileTTL {
+			continue
+		}
+		if until, ok := priv.ProfileRetryAfter[t.Key]; ok && time.Now().Before(until) {
+			continue
+		}
+		page := t.Page
+		if page == "" {
+			page = strings.ReplaceAll(t.Name, " ", "_")
+		}
+		title := strings.TrimPrefix(strings.TrimPrefix(page, "/"+t.Wiki+"/"), "/")
+
+		// Counted before the call: the rate-limit slot is spent whether or not
+		// the page comes back.
+		attempts++
+		html, err := d.lp.ParsePage(ctx, t.Wiki, title, profileTTL)
+		if err != nil {
+			d.logger.Printf("profile %s: %v", t.Key, err)
+			priv.ProfileRetryAfter[t.Key] = time.Now().Add(profileRetry)
+			continue
+		}
+		parsed, err := liquipedia.ParseTeam(html)
+		if err != nil {
+			d.logger.Printf("profile %s: %v", t.Key, err)
+			priv.ProfileRetryAfter[t.Key] = time.Now().Add(profileRetry)
+			continue
+		}
+		// A page that yields nothing is a template we do not understand, a
+		// redirect stub, or a disbanded org with only a Former section.
+		// Caching that would pin an empty panel in the UI for a week, so it is
+		// treated as a failure and retried on the slower schedule.
+		if len(parsed.Fields) == 0 && len(parsed.Roster) == 0 {
+			d.logger.Printf("profile %s: page yielded no fields or roster", t.Key)
+			priv.ProfileRetryAfter[t.Key] = time.Now().Add(profileRetry)
+			continue
+		}
+		delete(priv.ProfileRetryAfter, t.Key)
+
+		prof := store.TeamProfile{
+			FetchedAt: time.Now(),
+			Name:      t.Name,
+			Wiki:      t.Wiki,
+			Game:      t.Game,
+			Page:      t.Page,
+		}
+		for _, f := range parsed.Fields {
+			prof.Fields = append(prof.Fields, store.ProfileField{Label: f.Label, Value: f.Value})
+		}
+		for _, r := range parsed.Roster {
+			prof.Roster = append(prof.Roster, store.ProfilePlayer{
+				ID: r.ID, Name: r.Name, Position: r.Position,
+				Joined: r.Joined, Country: r.Country, Captain: r.Captain,
+				Page: r.Page,
+			})
+		}
+		priv.TeamProfiles[t.Key] = prof
+		d.logger.Printf("profile %s: %d fields, %d players", t.Key, len(prof.Fields), len(prof.Roster))
+	}
+	if pending := len(targets) - len(priv.TeamProfiles); pending > 0 {
+		d.logger.Printf("profiles: %d of %d cached, rest follow on later refreshes",
+			len(priv.TeamProfiles), len(targets))
+	}
+}
+
+// resultLabelRe matches infobox rows that exist to state results.
+var resultLabelRe = regexp.MustCompile(`(?i)\b(placement|achievement|result|medal|trophy|title[s]?\s+won|podium|standing)`)
+
+// publishProfiles writes the profiles the UI reads.
+//
+// The roster and the club details carry no results, but an infobox row can:
+// templates vary by wiki and some carry achievements or placements outright.
+// Rather than allow-listing labels, which would silently drop useful rows a
+// wiki adds later, every row goes through the same scanner the VOD titles use.
+func (d *Daemon) publishProfiles(priv store.Private) error {
+	out := make([]store.TeamProfile, 0, len(priv.TeamProfiles))
+	dropped := 0
+	for _, p := range priv.TeamProfiles {
+		kept := p
+		kept.Fields = nil
+		for _, f := range p.Fields {
+			// The label is checked as well as the value, and separately from
+			// the leak scanner. A row headed "Achievements" or "Best
+			// Placement" is a result whatever notation its value happens to
+			// use, and no pattern can be relied on to recognise every form a
+			// wiki template might write it in.
+			if resultLabelRe.MatchString(f.Label) ||
+				spoiler.IsSpoilery(f.Label) || spoiler.IsSpoilery(f.Value) {
+				dropped++
+				continue
+			}
+			kept.Fields = append(kept.Fields, f)
+		}
+		out = append(out, kept)
+	}
+	if dropped > 0 {
+		d.logger.Printf("profiles: withheld %d result-bearing field(s)", dropped)
+	}
+	return d.store.SaveProfiles(out)
+}
+
+const (
+	// maxGameIconDownloads bounds artwork fetches per refresh. Generous
+	// because these are small and fetched once ever; the real protection is
+	// the wall-clock budget below.
+	maxGameIconDownloads = 40
+	// gameIconBudget bounds the sweep in time. RefreshOnce holds d.mu for its
+	// whole body and Reevaluate takes the same lock, so a slow sweep stalls
+	// the tick that makes follow toggles and live transitions feel immediate.
+	gameIconBudget = 20 * time.Second
+)
+
+// cacheGameIcons downloads game artwork.
+//
+// Enabled games first, then the rest of the catalog a few at a time. The
+// settings grid shows every game, not just the enabled ones, so fetching only
+// what is enabled left most of that grid on its text badge indefinitely and
+// looked half-finished. These are small files fetched once ever — the whole
+// catalog is a few hundred kilobytes — so filling it in over a handful of
+// refreshes costs little and never delays the schedule.
+func (d *Daemon) cacheGameIcons(ctx context.Context) {
+	if d.logos.BackingOff() {
+		return
+	}
+	ua := d.lp.UserAgent()
+
+	order := make([]string, 0, len(config.Catalog))
+	seen := map[string]bool{}
+	for _, w := range d.cfg.EnabledWikis() {
+		if !seen[w.Slug] {
+			seen[w.Slug] = true
+			order = append(order, w.Slug)
+		}
+	}
+	for _, e := range config.Catalog {
+		if !seen[e.Slug] {
+			seen[e.Slug] = true
+			order = append(order, e.Slug)
+		}
+	}
+
+	attempts, cached := 0, 0
+	deadline := time.Now().Add(gameIconBudget)
+	for _, slug := range order {
+		if attempts >= maxGameIconDownloads || time.Now().After(deadline) {
+			break
+		}
+		url := logosource.GameURLFor(slug)
+		if url == "" || d.logos.Has(url) {
+			continue
+		}
+		// Counted before the call: a failed request spends the same pacing
+		// slot as a successful one.
+		attempts++
+		if _, err := d.logos.Fetch(ctx, url, ua); err != nil {
+			if errors.Is(err, liquipedia.ErrBackoff) {
+				return
+			}
+			d.logger.Printf("game icon %s: %v", slug, err)
+			continue
+		}
+		cached++
+	}
+	if cached > 0 {
+		d.logger.Printf("game icons: cached %d", cached)
+	}
+}
+
+// publishGames writes the catalog the UI renders its game chips from.
+func (d *Daemon) publishGames() error {
+	catalog := config.Catalog
+	out := make([]store.PublicGame, 0, len(catalog))
+	withArt := 0
+	for _, e := range catalog {
+		g := store.PublicGame{
+			Slug:    e.Slug,
+			Game:    e.Game,
+			Short:   e.Short,
+			Enabled: d.cfg.WikiEnabled(e.Slug),
+		}
+		if url := logosource.GameURLFor(e.Slug); url != "" {
+			if p := d.logos.Resolve(url); p != "" {
+				g.Icon = "file://" + p
+				withArt++
+			}
+		}
+		out = append(out, g)
+	}
+	if withArt > 0 {
+		d.logger.Printf("games: %d of %d with artwork", withArt, len(out))
+	}
+	return d.store.SaveGames(out)
+}
+
 // warnIfOversubscribed points out when the enabled games cannot be fetched
 // inside the poll interval.
 //
@@ -782,7 +1077,7 @@ func (d *Daemon) warnIfOversubscribed(interval time.Duration) {
 		return
 	}
 	// Each ticker is one parse; tournament enrichment adds up to its own cap.
-	worst := time.Duration(games+d.maxTournamentFetches) * 30 * time.Second
+	worst := time.Duration(games+d.maxTournamentFetches+maxProfileFetches) * 30 * time.Second
 	if worst <= interval {
 		return
 	}
@@ -1073,44 +1368,202 @@ func (d *Daemon) enrich(ctx context.Context, ms []match.Match, priv *store.Priva
 	return nil
 }
 
-// discoverVODs looks for recorded video of finished matches on the channels
-// associated with their tournament.
+// discoverVODs looks for recorded video of finished matches.
+//
+// Two things were wrong with scoping this per tournament. The channels come
+// from a tournament page, but stream enrichment skips finished matches — so
+// the very pages whose matches need a VOD never had their channels fetched.
+// And a big event spans several pages (Group Stage, Main Event), each with its
+// own broadcast table.
+//
+// So every known channel is polled, and every unmatched finished fixture is
+// offered every remembered video. Matching demands both team names, which
+// makes a cross-tournament false positive very unlikely.
 func (d *Daemon) discoverVODs(ctx context.Context, ms []match.Match, priv *store.Private) {
 	maxAge := time.Duration(d.cfg.YouTube.MaxAge)
 
-	// Collect the channels worth checking, and which matches each serves.
-	channels := map[string][]int{}
-	for i, m := range ms {
-		if m.State != match.StateFinished || m.VOD != nil {
+	channels := d.knownChannels(priv)
+	for _, id := range channels {
+		videos, err := d.yt.Videos(ctx, id)
+		if err != nil {
+			d.logger.Printf("youtube %s: %v", id, err)
 			continue
 		}
-		if time.Since(m.StartsAt) > maxAge {
-			continue
-		}
-		if info, ok := priv.TournamentStreams[m.Tournament.Page]; ok {
-			for _, c := range info.YouTubeChannels {
-				channels[c] = append(channels[c], i)
-			}
-		}
-		for _, c := range d.cfg.YouTube.Channels {
-			channels[c] = append(channels[c], i)
-		}
+		d.rememberVideos(videos, priv)
 	}
 
-	for channelID, idxs := range channels {
-		videos, err := d.yt.Videos(ctx, channelID)
-		if err != nil {
-			d.logger.Printf("youtube %s: %v", channelID, err)
+	found := d.matchVODs(ms, priv, maxAge)
+
+	// Anything still unmatched is either genuinely unrecorded or was uploaded
+	// before we started watching. Only the second case is fixable, and only by
+	// reading further back than a feed goes.
+	if d.cfg.YouTube.Backfill && d.ytBack.Available() {
+		if missing := unmatchedFinished(ms, maxAge); len(missing) > 0 {
+			if d.backfillVODs(ctx, missing, channels, priv) {
+				found += d.matchVODs(ms, priv, maxAge)
+			}
+		}
+	}
+	if found > 0 {
+		d.logger.Printf("vods: matched %d fixture(s) against %d remembered video(s)", found, len(priv.Videos))
+	}
+}
+
+// matchVODs ties remembered videos to fixtures that do not yet have one.
+func (d *Daemon) matchVODs(ms []match.Match, priv *store.Private, maxAge time.Duration) int {
+	known := make([]youtube.Video, 0, len(priv.Videos))
+	for _, v := range priv.Videos {
+		known = append(known, youtube.Video{
+			ID: v.ID, Title: v.Title, Channel: v.Channel,
+			Published: v.Published, Thumbnail: v.Thumbnail, Lang: v.Lang,
+		})
+	}
+	found := 0
+	for i := range ms {
+		if ms[i].State != match.StateFinished || ms[i].VOD != nil {
 			continue
 		}
-		for _, i := range idxs {
-			if ms[i].VOD != nil {
-				continue
+		if time.Since(ms[i].StartsAt) > maxAge {
+			continue
+		}
+		if v := youtube.Match(ms[i], known, "en", maxAge); v != nil {
+			ms[i].VOD = v
+			found++
+			d.logger.Printf("vod for %s: %s", ms[i].Title(), v.VideoID)
+		}
+	}
+	return found
+}
+
+// unmatchedFinished lists the fixtures a VOD is still wanted for.
+func unmatchedFinished(ms []match.Match, maxAge time.Duration) []match.Match {
+	var out []match.Match
+	for i := range ms {
+		if ms[i].State == match.StateFinished && ms[i].VOD == nil &&
+			time.Since(ms[i].StartsAt) <= maxAge {
+			out = append(out, ms[i])
+		}
+	}
+	return out
+}
+
+const (
+	// videoSweepTTL spaces out the deep channel walk. It is much heavier than
+	// an RSS poll, and a channel's back catalogue does not change.
+	videoSweepTTL = 24 * time.Hour
+	// maxHydrate bounds how many publish dates one sweep resolves. Each costs
+	// its own request, so this is the real cost ceiling of a backfill.
+	maxHydrate = 60
+)
+
+// backfillVODs walks channels with yt-dlp to recover uploads that have already
+// left the RSS window, and reports whether it learned anything new.
+func (d *Daemon) backfillVODs(ctx context.Context, missing []match.Match, channels []string, priv *store.Private) bool {
+	if priv.VideoSweeps == nil {
+		priv.VideoSweeps = map[string]time.Time{}
+	}
+	added := 0
+	for _, ch := range channels {
+		if time.Since(priv.VideoSweeps[ch]) < videoSweepTTL {
+			continue
+		}
+		listing, err := d.ytBack.List(ctx, ch)
+		// Record the attempt either way, so a channel that consistently fails
+		// is not retried on every single refresh.
+		priv.VideoSweeps[ch] = time.Now()
+		if err != nil {
+			d.logger.Printf("backfill %s: %v", ch, err)
+			continue
+		}
+
+		// Only videos naming both sides of a fixture we still want are worth a
+		// date lookup; everything else on the channel is dropped for free.
+		short := youtube.ShortlistFor(missing, listing, "en", 3)
+		need := make([]string, 0, len(short))
+		for _, v := range short {
+			if _, seen := priv.Videos[v.ID]; !seen {
+				need = append(need, v.ID)
 			}
-			if v := youtube.Match(ms[i], videos, "en", maxAge); v != nil {
-				ms[i].VOD = v
-				d.logger.Printf("vod for %s: %s", ms[i].Title(), v.VideoID)
+		}
+		if len(need) > maxHydrate {
+			d.logger.Printf("backfill %s: %d candidates, resolving %d (best per fixture first)", ch, len(need), maxHydrate)
+			need = need[:maxHydrate]
+		}
+		if len(need) == 0 {
+			d.logger.Printf("backfill %s: %d uploads listed, nothing new to resolve", ch, len(listing))
+			continue
+		}
+
+		dates, err := d.ytBack.Dates(ctx, need)
+		if err != nil {
+			d.logger.Printf("backfill %s dates: %v", ch, err)
+		}
+		hydrated := make([]youtube.Video, 0, len(dates))
+		for _, v := range short {
+			// A video with no resolved date can never match a fixture, and
+			// storing it would mask it from a later retry.
+			if t, ok := dates[v.ID]; ok {
+				v.Published = t
+				hydrated = append(hydrated, v)
 			}
+		}
+		d.rememberVideos(hydrated, priv)
+		added += len(hydrated)
+		d.logger.Printf("backfill %s: %d uploads listed, %d recovered", ch, len(listing), len(hydrated))
+	}
+	return added > 0
+}
+
+// knownChannels is every YouTube channel worth polling: those discovered from
+// any tournament page, plus any the user added by hand.
+func (d *Daemon) knownChannels(priv *store.Private) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	for _, info := range priv.TournamentStreams {
+		for _, c := range info.YouTubeChannels {
+			add(c)
+		}
+	}
+	for _, c := range d.cfg.YouTube.Channels {
+		add(c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// rememberVideos folds a feed into the persistent index.
+//
+// A channel's RSS feed carries only its ~15 most recent uploads. During a big
+// event that is a couple of days — the official Dota channel posts every match
+// in four languages — so a fixture played on Tuesday has scrolled out of the
+// feed by Thursday and could never be matched. Remembering what we have seen
+// turns a rolling window into an accumulating index.
+func (d *Daemon) rememberVideos(videos []youtube.Video, priv *store.Private) {
+	if priv.Videos == nil {
+		priv.Videos = map[string]store.StoredVideo{}
+	}
+	for _, v := range videos {
+		if v.ID == "" {
+			continue
+		}
+		priv.Videos[v.ID] = store.StoredVideo{
+			ID: v.ID, Title: v.Title, Channel: v.Channel,
+			Published: v.Published, Thumbnail: v.Thumbnail, Lang: v.Lang,
+		}
+	}
+	// Bound the index: a video older than any plausible catch-up window cannot
+	// match a fixture we still track.
+	cutoff := time.Now().Add(-90 * 24 * time.Hour)
+	for id, v := range priv.Videos {
+		if !v.Published.IsZero() && v.Published.Before(cutoff) {
+			delete(priv.Videos, id)
 		}
 	}
 }

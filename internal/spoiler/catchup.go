@@ -26,6 +26,22 @@ import (
 // Masking happens here, in the daemon, so the withheld opponent is absent from
 // the published state rather than merely undrawn by the UI.
 
+// vodBacklogWindow is how long an unwatched match with a VOD keeps counting as
+// a backlog, overriding the shorter ordinary window.
+//
+// The ordinary window encodes "you have probably stopped caring", which cannot
+// be true of a match we are still actively offering to play. Backfilling VODs
+// makes this concrete: recovering a five-day-old VOD is precisely the moment
+// the user starts caring about that match again, and a window that had already
+// expired would leave the whole bracket around it unmasked.
+//
+// It is bounded rather than open-ended so that masking cannot be held open
+// forever by a match nobody will ever watch. The daemon drops finished matches
+// after seven days, so in practice retention bites first; stating a bound here
+// keeps the guarantee local to this file rather than resting on a distant
+// caller's retention policy.
+const vodBacklogWindow = 14 * 24 * time.Hour
+
 // CatchUpOptions configures masking.
 type CatchUpOptions struct {
 	// Teams is the follow list.
@@ -35,8 +51,9 @@ type CatchUpOptions struct {
 	// Revealed marks matches the user explicitly unblinded; these are never
 	// masked and never cause masking.
 	Revealed map[string]bool
-	// Window bounds how far back an unwatched match still counts as a backlog.
-	// Beyond it we assume the user has moved on.
+	// Window bounds how far back an unwatched match still counts as a backlog
+	// when there is nothing left to watch. A match that still has a VOD stays
+	// a backlog regardless of age.
 	Window time.Duration
 	// Now is the reference time.
 	Now time.Time
@@ -121,6 +138,7 @@ func applyTeamQueue(ms []match.Match, team, wiki string, opts CatchUpOptions,
 		if len(idxs) == 0 {
 			return
 		}
+		vodCutoff := opts.Now.Add(-vodBacklogWindow)
 
 		head := -1
 		for _, i := range idxs {
@@ -131,8 +149,9 @@ func applyTeamQueue(ms []match.Match, team, wiki string, opts CatchUpOptions,
 			if m.Watched || opts.Revealed[m.ID] {
 				continue
 			}
-			if m.StartsAt.Before(cutoff) {
-				// Older than the window: assume it is no longer a backlog.
+			if m.StartsAt.Before(cutoff) && (m.VOD == nil || m.StartsAt.Before(vodCutoff)) {
+				// Older than the window with nothing left to watch: assume the
+				// user has moved on.
 				continue
 			}
 			head = i

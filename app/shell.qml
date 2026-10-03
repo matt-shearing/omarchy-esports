@@ -16,6 +16,8 @@ ShellRoot {
 
     property var model: Model.parseState("")
     property var teamIndex: []
+    property var profiles: []
+    property var games: []
     property double nowMs: Date.now()
     property string tab: "upcoming"
     property string busy: ""
@@ -28,6 +30,9 @@ ShellRoot {
     // VODs view filters.
     property bool vodFollowedOnly: false
     property string vodTournament: ""
+    // Which VOD list is showing. Empty means the user has not chosen, in which
+    // case vodTabFor picks; a click pins it.
+    property string vodTab: ""
     property var config: Model.parseConfig("")
     // Shown until first-run setup is done. Held locally as well so finishing
     // the wizard takes effect immediately rather than waiting for the config
@@ -45,6 +50,26 @@ ShellRoot {
         printErrors: false
         onLoaded: app.model = Model.parseState(text())
         onLoadFailed: app.model = Model.parseState("")
+        onFileChanged: reload()
+    }
+
+    FileView {
+        id: gamesFile
+        path: app.stateDir + "/games.json"
+        watchChanges: true
+        printErrors: false
+        onLoaded: app.games = Model.parseGames(text())
+        onLoadFailed: app.games = []
+        onFileChanged: reload()
+    }
+
+    FileView {
+        id: profilesFile
+        path: app.stateDir + "/profiles.json"
+        watchChanges: true
+        printErrors: false
+        onLoaded: app.profiles = Model.parseProfiles(text())
+        onLoadFailed: app.profiles = []
         onFileChanged: reload()
     }
 
@@ -80,13 +105,21 @@ ShellRoot {
         onTriggered: app.nowMs = Date.now()
     }
 
-    // Neither file exists before the daemon's first run, and FileView cannot
-    // watch a path that is not there yet.
+    // None of these files exist before the daemon's first run, and FileView
+    // cannot watch a path that is not there yet. profiles.json in particular
+    // is only written once a refresh completes, which on a fresh install or an
+    // upgrade is a whole poll interval away — without retrying, the watch is
+    // never established and the team detail view stays empty until the app is
+    // restarted.
     Timer {
         interval: 4000
         running: !app.model.ok || app.teamIndex.length === 0
+            || app.profiles.length === 0 || app.games.length === 0
         repeat: true
-        onTriggered: { stateFile.reload(); teamsFile.reload() }
+        onTriggered: {
+            stateFile.reload(); teamsFile.reload()
+            profilesFile.reload(); gamesFile.reload()
+        }
     }
 
     Process { id: proc }
@@ -216,11 +249,14 @@ ShellRoot {
         tournament: vodTournament
     })
     readonly property var vodTournaments: Model.tournamentsWithVods(model.matches)
+    readonly property string vodTabActive: Model.vodTabFor(app.vods, app.vodTab)
     readonly property var searchResults: Model.searchTeams(teamIndex, teamQuery,
         { minChars: 2, limit: 20, wiki: gameFilter })
     readonly property var indexGames: Model.filterGames(config, teamIndex)
     property string selectedTeamWiki: ""
     readonly property var teamDetail: Model.teamMatches(model.matches, selectedTeam, selectedTeamWiki)
+    readonly property var teamProfile: Model.profileFor(profiles, selectedTeam, selectedTeamWiki)
+    readonly property var teamRecordings: Model.teamVods(model.matches, selectedTeam, selectedTeamWiki)
 
     FloatingWindow {
         id: win
@@ -240,6 +276,7 @@ ShellRoot {
             visible: app.config.ok && !app.setupDone
             config: app.config
             teamIndex: app.teamIndex
+            games: app.games
             followed: app.config.ok ? app.config.teams : app.model.teams
             onApply: function (key, value) { app.applySetting(key, value) }
             onApplyWiki: function (slug, on) { app.applyWiki(slug, on) }
@@ -381,6 +418,7 @@ ShellRoot {
                             width: matchList.width
                             match: modelData
                             teams: app.model.teams
+                            games: app.games
                             nowMs: app.nowMs
                             onWatch: app.watch(modelData)
                             onReveal: app.run(["reveal", modelData.id], "revealing…")
@@ -396,6 +434,40 @@ ShellRoot {
                 // 1 — VODs and the catch-up queue
                 ColumnLayout {
                     spacing: 10
+
+                    // The two lists are ordered in opposite directions and
+                    // answer different questions, so they get a switch rather
+                    // than one scroll: the archive below a long backlog is the
+                    // wrong way round for "what just got uploaded".
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        AppButton {
+                            text: "Catch up" + (app.vods.queue.length > 0
+                                ? "  " + app.vods.queue.length : "")
+                            accentuated: app.vodTabActive === "catchup"
+                            onClicked: app.vodTab = "catchup"
+                        }
+
+                        AppButton {
+                            text: "Recent recordings" + (app.vods.rest.length > 0
+                                ? "  " + app.vods.rest.length : "")
+                            accentuated: app.vodTabActive === "recent"
+                            onClicked: app.vodTab = "recent"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: app.vodTabActive === "catchup"
+                                ? "Oldest first — watching one unlocks the next"
+                                : "Newest first"
+                            color: Theme.muted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                        }
+                    }
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -448,10 +520,18 @@ ShellRoot {
                         anchors.centerIn: parent
                         visible: vodList.count === 0
                         text: {
+                            var other = app.vodTabActive === "catchup"
+                                ? app.vods.rest.length : app.vods.queue.length
+                            var elsewhere = other > 0
+                                ? "\n\n" + other + " in " + (app.vodTabActive === "catchup"
+                                    ? "Recent recordings" : "Catch up") + "."
+                                : ""
+                            if (app.vodTabActive === "catchup")
+                                return "Nothing to catch up on." + elsewhere
                             if (app.vodTournament !== "")
-                                return "No recordings for " + app.vodTournament + "."
+                                return "No recordings for " + app.vodTournament + "." + elsewhere
                             if (app.vodFollowedOnly)
-                                return "No recordings for your teams yet.\n\nTurn off \"My teams\" to see everything."
+                                return "No recordings for your teams yet.\n\nTurn off \"My teams\" to see everything." + elsewhere
                             return "No recordings yet.\n\nVODs appear once a match finishes and the\nbroadcaster uploads it."
                         }
                         color: Theme.muted
@@ -468,70 +548,27 @@ ShellRoot {
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-                        // A flat model of section headers and cards, so the
-                        // queue and the archive scroll as one list.
-                        model: {
-                            var rows = []
-                            if (app.vods.queue.length > 0) {
-                                rows.push({ kind: "header", text: "CATCH UP",
-                                    hint: "Oldest first. Watching one unlocks the next." })
-                                for (var i = 0; i < app.vods.queue.length; i++)
-                                    rows.push({ kind: "match", match: app.vods.queue[i] })
-                            }
-                            if (app.vods.rest.length > 0) {
-                                rows.push({ kind: "header", text: "RECENT RECORDINGS", hint: "" })
-                                for (var j = 0; j < app.vods.rest.length; j++)
-                                    rows.push({ kind: "match", match: app.vods.rest[j] })
-                            }
-                            return rows
-                        }
+                        // Only the selected list. The tab is the heading, so
+                        // in-list section headers would just repeat it.
+                        model: app.vodTabActive === "catchup"
+                            ? app.vods.queue : app.vods.rest
 
-                        delegate: Loader {
+                        delegate: MatchCard {
                             required property var modelData
                             width: vodList.width
-                            sourceComponent: modelData.kind === "header" ? headerComponent : cardComponent
-
-                            Component {
-                                id: headerComponent
-                                ColumnLayout {
-                                    spacing: 2
-                                    Text {
-                                        text: modelData.text
-                                        color: Theme.foreground
-                                        opacity: 0.5
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontCaption
-                                        font.bold: true
-                                        font.letterSpacing: 1
-                                        Layout.topMargin: 10
-                                    }
-                                    Text {
-                                        visible: modelData.hint !== ""
-                                        text: modelData.hint
-                                        color: Theme.muted
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontCaption
-                                    }
-                                }
+                            match: modelData
+                            teams: app.model.teams
+                            games: app.games
+                            nowMs: app.nowMs
+                            tournamentClickable: true
+                            onWatch: app.watch(modelData)
+                            onReveal: app.run(["reveal", modelData.id], "revealing…")
+                            onMarkWatched: app.run(["watched", modelData.id], "updating…")
+                            onInspectTeam: function (name) {
+                                app.selectedTeam = name
+                                app.selectedTeamWiki = modelData.wiki || ""
                             }
-
-                            Component {
-                                id: cardComponent
-                                MatchCard {
-                                    match: modelData.match
-                                    teams: app.model.teams
-                                    nowMs: app.nowMs
-                                    tournamentClickable: true
-                                    onWatch: app.watch(modelData.match)
-                                    onReveal: app.run(["reveal", modelData.match.id], "revealing…")
-                                    onMarkWatched: app.run(["watched", modelData.match.id], "updating…")
-                                    onInspectTeam: function (name) {
-                                        app.selectedTeam = name
-                                        app.selectedTeamWiki = modelData.match.wiki || ""
-                                    }
-                                    onInspectTournament: function (name) { app.vodTournament = name }
-                                }
-                            }
+                            onInspectTournament: function (name) { app.vodTournament = name }
                         }
                     }
                     }
@@ -705,9 +742,50 @@ ShellRoot {
                         }
                     }
 
+                    // Club details from the team's own page, when we hold them.
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 14
+                        visible: app.teamProfile !== null
+
+                        Repeater {
+                            model: app.teamProfile ? app.teamProfile.fields : []
+                            delegate: Text {
+                                required property var modelData
+                                // The separator matches the stat line below.
+                                // Without it the fields read as one run of
+                                // muted text with no boundaries.
+                                text: modelData.label + " " + modelData.value + "  ·"
+                                color: Theme.muted
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontCaption
+                            }
+                        }
+                    }
+
                     Text {
-                        text: app.teamDetail.upcoming.length + " upcoming · " +
-                              app.teamDetail.past.length + " played"
+                        text: {
+                            var bits = []
+                            if (app.teamProfile && app.teamProfile.roster.length)
+                                bits.push(app.teamProfile.roster.length + " on roster")
+                            bits.push(app.teamDetail.upcoming.length + " upcoming")
+                            bits.push(app.teamDetail.past.length + " played")
+                            bits.push(app.teamRecordings.length + " with a recording")
+                            return bits.join(" · ")
+                        }
+                        color: Theme.muted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                    }
+
+                    // Profiles cost a rate-limited page fetch each, so they are
+                    // only held for followed teams. Say so rather than leaving
+                    // an unexplained gap.
+                    Text {
+                        visible: app.teamProfile === null
+                        text: app.isFollowed(app.selectedTeam, app.selectedTeamWiki)
+                            ? "Roster and club details load on the next refresh."
+                            : "Follow this team to load its roster and club details."
                         color: Theme.muted
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontCaption
@@ -723,15 +801,34 @@ ShellRoot {
 
                         model: {
                             var rows = []
+                            var roster = app.teamProfile ? app.teamProfile.roster : []
+                            if (roster.length) {
+                                rows.push({ kind: "header", text: "ROSTER", hint: "" })
+                                for (var r = 0; r < roster.length; r++)
+                                    rows.push({ kind: "player", player: roster[r] })
+                            }
                             if (app.teamDetail.upcoming.length) {
                                 rows.push({ kind: "header", text: "UPCOMING", hint: "" })
                                 for (var i = 0; i < app.teamDetail.upcoming.length; i++)
                                     rows.push({ kind: "match", match: app.teamDetail.upcoming[i] })
                             }
-                            if (app.teamDetail.past.length) {
+                            if (app.teamRecordings.length) {
+                                rows.push({ kind: "header", text: "RECORDINGS", hint: "" })
+                                for (var v = 0; v < app.teamRecordings.length; v++)
+                                    rows.push({ kind: "match", match: app.teamRecordings[v] })
+                            }
+                            // Recordings are drawn from the same played list,
+                            // so anything shown above is skipped here rather
+                            // than rendered a second time.
+                            var rest = []
+                            for (var j = 0; j < app.teamDetail.past.length; j++) {
+                                if (!Model.hasVod(app.teamDetail.past[j]))
+                                    rest.push(app.teamDetail.past[j])
+                            }
+                            if (rest.length) {
                                 rows.push({ kind: "header", text: "PLAYED", hint: "" })
-                                for (var j = 0; j < app.teamDetail.past.length; j++)
-                                    rows.push({ kind: "match", match: app.teamDetail.past[j] })
+                                for (var k = 0; k < rest.length; k++)
+                                    rows.push({ kind: "match", match: rest[k] })
                             }
                             return rows
                         }
@@ -739,7 +836,13 @@ ShellRoot {
                         delegate: Loader {
                             required property var modelData
                             width: ListView.view.width
-                            sourceComponent: modelData.kind === "header" ? detailHeader : detailCard
+                            sourceComponent: modelData.kind === "header" ? detailHeader
+                                : modelData.kind === "player" ? detailPlayer : detailCard
+
+                            Component {
+                                id: detailPlayer
+                                RosterRow { player: modelData.player }
+                            }
 
                             Component {
                                 id: detailHeader
@@ -760,6 +863,7 @@ ShellRoot {
                                 MatchCard {
                                     match: modelData.match
                                     teams: app.model.teams
+                                    games: app.games
                                     nowMs: app.nowMs
                                     onWatch: app.watch(modelData.match)
                                     onReveal: app.run(["reveal", modelData.match.id], "revealing…")
@@ -774,6 +878,7 @@ ShellRoot {
                 SettingsView {
                     config: app.config
                     teamIndex: app.teamIndex
+                    games: app.games
                     onApply: function (key, value) { app.applySetting(key, value) }
                     onApplyWiki: function (slug, on) { app.applyWiki(slug, on) }
                 }

@@ -288,3 +288,34 @@ func TestLoadRepairsWrongShortBadges(t *testing.T) {
 		}
 	}
 }
+
+// The follow list mixes unscoped entries ("Falcons", every game) with scoped
+// ones ({GamerLegion, dota2}). The UI shows "Following" on a per-game row when
+// either kind covers it, so FollowCovers has to agree with that or the buttons
+// lie about what a click will do.
+func TestFollowCovers(t *testing.T) {
+	cfg := Config{Teams: []Follow{
+		{Name: "Falcons"},
+		{Name: "GamerLegion", Wiki: "dota2"},
+	}}
+	cases := []struct {
+		name, wiki string
+		want       bool
+		why        string
+	}{
+		{"Falcons", "dota2", true, "an unscoped entry follows every game"},
+		{"Falcons", "counterstrike", true, "including games it has never played"},
+		{"Falcons", "", true, "and answers the any-game question"},
+		{"falcons", "dota2", true, "matching is case-insensitive"},
+		{"GamerLegion", "dota2", true, "a scoped entry covers its own game"},
+		{"GamerLegion", "counterstrike", false, "but not another game"},
+		{"GamerLegion", "", true, "though it does answer the any-game question"},
+		{"Team Spirit", "dota2", false, "an absent team is not followed"},
+	}
+	for _, c := range cases {
+		if got := cfg.FollowCovers(c.name, c.wiki); got != c.want {
+			t.Errorf("FollowCovers(%q, %q) = %v, want %v — %s",
+				c.name, c.wiki, got, c.want, c.why)
+		}
+	}
+}

@@ -31,6 +31,8 @@ Panel {
 
     // ---- state ----
     property var model: Model.parseState("")
+    // Game catalog with local artwork paths, published by the daemon.
+    property var games: []
     property double nowMs: Date.now()
     property int focusIndex: 0
     property bool cursorActive: false
@@ -84,13 +86,23 @@ Panel {
         onFileChanged: reload()
     }
 
-    // The state file may not exist before the daemon's first run; FileView
-    // cannot watch a missing path, so re-probe until it appears.
+    FileView {
+        id: gamesFile
+        path: root.statePath.replace(/state\.json$/, "games.json")
+        watchChanges: true
+        printErrors: false
+        onLoaded: root.games = Model.parseGames(text())
+        onLoadFailed: root.games = []
+        onFileChanged: reload()
+    }
+
+    // Neither file exists before the daemon's first run; FileView cannot watch
+    // a missing path, so re-probe until they appear.
     Timer {
         interval: 5000
-        running: !root.model.ok
+        running: !root.model.ok || root.games.length === 0
         repeat: true
-        onTriggered: stateFile.reload()
+        onTriggered: { stateFile.reload(); gamesFile.reload() }
     }
 
     // Clock for countdowns. One second while the panel is open so the numbers
@@ -263,12 +275,18 @@ Panel {
 
                     Item { Layout.fillWidth: true }
 
+                    // Capped at its natural width so the spacer above takes
+                    // the slack, but shrinkable, so a narrow panel elides this
+                    // note instead of pushing the buttons off the right edge.
                     Text {
                         textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: implicitWidth
                         visible: root.model.spoilers !== "off"
                         text: "󰈉 spoiler-free"
                         color: root.bar ? root.bar.foreground : Color.popups.text
                         opacity: 0.5
+                        elide: Text.ElideRight
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.caption
                     }
@@ -302,7 +320,13 @@ Panel {
                     }
                 }
 
-                PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.popups.text }
+                // A Layout hands out width imperatively, which overwrites the
+                // parent-width binding PanelSeparator carries; without
+                // fillWidth the rule draws at its 100px implicit width.
+                PanelSeparator {
+                    Layout.fillWidth: true
+                    foreground: root.bar ? root.bar.foreground : Color.popups.text
+                }
 
                 // Empty / error states
                 Text {
@@ -371,7 +395,10 @@ Panel {
                             font.pixelSize: Style.font.caption
                             font.bold: true
                             Layout.topMargin: Style.space(4)
-                            Layout.leftMargin: Style.space(4)
+                            // A row's fill bleeds to the panel edge but its
+                            // text is inset; match that inset so the header
+                            // shares a left edge with the rows it introduces.
+                            Layout.leftMargin: Style.space(10)
                         }
 
                         Repeater {
@@ -384,6 +411,7 @@ Panel {
                                 match: modelData
                                 bar: root.bar
                                 teams: root.model.teams
+                                games: root.games
                                 darkTheme: root.darkTheme
                                 nowMs: root.nowMs
                                 expanded: root.expandedId === modelData.id
@@ -400,6 +428,7 @@ Panel {
                 }
 
                 PanelSeparator {
+                    Layout.fillWidth: true
                     visible: root.model.ok
                     foreground: root.bar ? root.bar.foreground : Color.popups.text
                 }
@@ -410,17 +439,21 @@ Panel {
                     Layout.fillWidth: true
                     spacing: Style.space(8)
 
+                    // Wraps rather than elides: the licence wants the whole
+                    // notice, and a Layout will not shrink a child that does
+                    // not fill, so left alone this one line set the panel's
+                    // minimum width and pushed the list past the card edge.
                     Text {
                         textFormat: Text.PlainText
+                        Layout.fillWidth: true
                         text: (root.model.attribution !== "" ? root.model.attribution
                             : "Data via Liquipedia (CC BY-SA 3.0)") + " · logos © their owners"
                         color: root.bar ? root.bar.foreground : Color.popups.text
                         opacity: 0.35
+                        wrapMode: Text.WordWrap
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.caption
                     }
-
-                    Item { Layout.fillWidth: true }
 
                     Button {
                         text: "Refresh"
