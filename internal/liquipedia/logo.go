@@ -22,8 +22,13 @@ import (
 // Fetching one is a single cheap `action=query` call. Asking for section 0 of
 // the page returns just the infobox — about 2KB instead of the ~58KB full
 // article — and `{{Infobox team}}` exposes `image=` and `imagedark=` with the
-// same field names across every wiki checked. The file name is then turned
-// into a URL locally, so no second round-trip is needed.
+// same field names across every wiki checked.
+//
+// The file names are then resolved to URLs through `prop=imageinfo`. Building
+// the URL locally from the name's MD5 bucket saves that round-trip but breaks
+// when a file is renamed: Liquipedia keeps the old name as a redirect, and the
+// hashed path for a redirect 404s (FlyQuest's 2021 logo did exactly this). The
+// local build remains the fallback when the lookup fails.
 
 type revisionsResponse struct {
 	Query struct {
@@ -76,11 +81,12 @@ func (c *Client) FetchLogo(ctx context.Context, wiki, team string) (match.Logo, 
 		text := page.Revisions[0].Slots.Main.Content
 		light := infoboxFile(imageFieldRe, text)
 		dark := infoboxFile(imageDarkFieldRe, text)
+		resolved := c.resolveFiles(ctx, wiki, light, dark)
 		if light != "" {
-			logo.Light = CommonsFileURL(light)
+			logo.Light = resolved[light]
 		}
 		if dark != "" {
-			logo.Dark = CommonsFileURL(dark)
+			logo.Dark = resolved[dark]
 		} else if light != "" {
 			// A single "allmode" file serves both themes; Astralis ships only
 			// one, for example.
@@ -88,6 +94,97 @@ func (c *Client) FetchLogo(ctx context.Context, wiki, team string) (match.Logo, 
 		}
 	}
 	return logo, nil
+}
+
+type imageInfoResponse struct {
+	Query struct {
+		Normalized []struct{ From, To string } `json:"normalized"`
+		Redirects  []struct{ From, To string } `json:"redirects"`
+		Pages      map[string]struct {
+			Title     string `json:"title"`
+			ImageInfo []struct {
+				URL string `json:"url"`
+			} `json:"imageinfo"`
+		} `json:"pages"`
+	} `json:"query"`
+}
+
+// resolveFiles maps each file name to its real URL, following renames. Any
+// name the API cannot resolve falls back to the locally built commons URL.
+func (c *Client) resolveFiles(ctx context.Context, wiki string, files ...string) map[string]string {
+	out := map[string]string{}
+	var titles []string
+	for _, f := range files {
+		if f == "" {
+			continue
+		}
+		out[f] = CommonsFileURL(f)
+		titles = append(titles, "File:"+strings.TrimPrefix(f, "File:"))
+	}
+	if len(titles) == 0 {
+		return out
+	}
+	endpoint := fmt.Sprintf("https://liquipedia.net/%s/api.php?%s", url.PathEscape(wiki), url.Values{
+		"action":    {"query"},
+		"titles":    {strings.Join(titles, "|")},
+		"prop":      {"imageinfo"},
+		"iiprop":    {"url"},
+		"redirects": {"1"},
+		"format":    {"json"},
+	}.Encode())
+	body, err := c.get(ctx, endpoint, false)
+	if err != nil {
+		return out
+	}
+	var resp imageInfoResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return out
+	}
+	for f, u := range ResolveImageInfo(resp, files...) {
+		out[f] = u
+	}
+	return out
+}
+
+// ResolveImageInfo walks a prop=imageinfo response from each requested file
+// name, through normalisation and redirects, to the URL of the file it lands
+// on. Names it cannot follow are left out.
+func ResolveImageInfo(resp imageInfoResponse, files ...string) map[string]string {
+	norm := map[string]string{}
+	for _, n := range resp.Query.Normalized {
+		norm[n.From] = n.To
+	}
+	redir := map[string]string{}
+	for _, r := range resp.Query.Redirects {
+		redir[r.From] = r.To
+	}
+	urls := map[string]string{}
+	for _, p := range resp.Query.Pages {
+		if len(p.ImageInfo) > 0 && strings.HasPrefix(p.ImageInfo[0].URL, "https://liquipedia.net/") {
+			urls[p.Title] = p.ImageInfo[0].URL
+		}
+	}
+	out := map[string]string{}
+	for _, f := range files {
+		if f == "" {
+			continue
+		}
+		t := "File:" + strings.TrimPrefix(f, "File:")
+		if n, ok := norm[t]; ok {
+			t = n
+		}
+		for hops := 0; hops < 3; hops++ {
+			r, ok := redir[t]
+			if !ok {
+				break
+			}
+			t = r
+		}
+		if u := urls[t]; u != "" {
+			out[f] = u
+		}
+	}
+	return out
 }
 
 // infoboxFile extracts a file name from an infobox field.

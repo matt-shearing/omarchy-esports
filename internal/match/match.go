@@ -27,6 +27,10 @@ type Opponent struct {
 	Page  string `json:"page,omitempty"` // liquipedia page path
 	Logo  Logo   `json:"logo,omitempty"` // light/dark variants
 
+	// Race is a StarCraft player's race ("Protoss", "Terran", "Zerg",
+	// "Random"). Empty for teams and for every other game.
+	Race string `json:"race,omitempty"`
+
 	// Hidden marks a side withheld by catch-up masking. When it is set every
 	// other field on this opponent is empty: knowing who a followed team plays
 	// next reveals that they won their previous match, so the identity is

@@ -102,6 +102,19 @@ func (f Follow) MarshalJSON() ([]byte, error) {
 	return json.Marshal(raw(f))
 }
 
+// Interest selects matches by game, tier and (for StarCraft) player race.
+type Interest struct {
+	// Wiki is the game, e.g. "starcraft2". Required.
+	Wiki string `json:"wiki"`
+	// MaxTier keeps tournaments at this Liquipedia tier or better: 1 is
+	// S-Tier only, 2 adds A-Tier. Zero accepts any tier, including unknown.
+	MaxTier int `json:"maxTier,omitempty"`
+	// Race requires at least one player of this race ("Protoss").
+	Race string `json:"race,omitempty"`
+	// MainEventOnly drops qualifiers, weeklies and showmatches.
+	MainEventOnly bool `json:"mainEventOnly,omitempty"`
+}
+
 // Label renders the entry for display, e.g. "GamerLegion (dota2)".
 func (f Follow) Label() string {
 	if f.Wiki == "" {
@@ -115,6 +128,11 @@ type Config struct {
 	// Teams is the follow list. Names are matched case-insensitively against
 	// both canonical Liquipedia names and ticker abbreviations.
 	Teams []Follow `json:"teams"`
+
+	// Interests mark matches as followed by what they are rather than who is
+	// playing: "top-tier StarCraft with a Protoss in it". A match matching any
+	// interest is treated exactly like one involving a followed team.
+	Interests []Interest `json:"interests,omitempty"`
 
 	// Wikis are the Liquipedia wikis to poll.
 	Wikis []Wiki `json:"wikis"`

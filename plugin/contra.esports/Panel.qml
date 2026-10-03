@@ -39,7 +39,11 @@ Panel {
     // Id of the row whose detail panel is open; empty means none.
     property string expandedId: ""
 
-    readonly property string home: (bar && bar.shell && bar.shell.home) ? bar.shell.home : ""
+    // Read from the environment. Omarchy now hands third-party plugins a
+    // restricted shell API without `home`, and reading it from there gave an
+    // empty prefix: the widget watched /.local/state/... and sat on "Waiting
+    // for the esports daemon" forever.
+    readonly property string home: Quickshell.env("HOME") || ""
     readonly property string statePath: home + "/.local/state/omarchy-esports/state.json"
 
     // Omarchy themes can be light or dark; pick artwork to match by measuring

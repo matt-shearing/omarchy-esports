@@ -617,7 +617,9 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 		return false
 	}
 
-	localise := func(l *match.Logo) {
+	// localise reports whether a remote URL is gone (404), so the caller can
+	// look the logo up afresh instead of retrying a dead URL every refresh.
+	localise := func(l *match.Logo) (gone bool) {
 		// Collapse per-size thumbnails onto one canonical file first, so a
 		// team drawn at 35px in one fixture and 50px in another is a single
 		// download rather than two.
@@ -641,7 +643,10 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 			attempts++
 			if _, err := d.logos.Fetch(ctx, remote, ua); err != nil {
 				if errors.Is(err, liquipedia.ErrBackoff) {
-					return // stop the whole sweep, not just this file
+					return false // stop the whole sweep, not just this file
+				}
+				if errors.Is(err, liquipedia.ErrNotFound) {
+					gone = true
 				}
 				d.logger.Printf("logo cache: %v", err)
 				continue
@@ -661,6 +666,7 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 			}
 			l.Dark = "file://" + p
 		}
+		return gone
 	}
 
 	// Fetch in the order the user will actually see them. Downloads are
@@ -704,7 +710,13 @@ func (d *Daemon) cacheLogos(ctx context.Context, ms []match.Match, priv *store.P
 		if strings.HasPrefix(e.Logo.Light, "file://") {
 			continue
 		}
-		localise(&e.Logo)
+		if localise(&e.Logo) && e.Logo.Local == "" {
+			// Renamed on the wiki. Forget the dead URL so fetchMissingLogos
+			// resolves the infobox again on a later refresh.
+			d.logger.Printf("logo %s: gone, will look it up again", k)
+			e.Logo = match.Logo{}
+			e.LogoChecked = false
+		}
 		priv.Teams[k] = e
 	}
 	if downloads > 0 {
@@ -1265,7 +1277,34 @@ func (d *Daemon) isFollowed(m *match.Match) bool {
 			return true
 		}
 	}
+	for _, in := range d.cfg.Interests {
+		if MatchesInterest(m, in) {
+			return true
+		}
+	}
 	return false
+}
+
+// MatchesInterest reports whether a match is one an interest asks for.
+func MatchesInterest(m *match.Match, in config.Interest) bool {
+	if in.Wiki == "" || m.Wiki != in.Wiki {
+		return false
+	}
+	if in.MaxTier > 0 && (m.Tournament.Tier == 0 || m.Tournament.Tier > in.MaxTier) {
+		return false
+	}
+	if in.MainEventOnly && m.Tournament.TierType != "" {
+		return false
+	}
+	if in.Race != "" {
+		for _, o := range m.Opponents {
+			if strings.EqualFold(o.Race, in.Race) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 // mergeWithKnown carries forward enrichment (streams, VODs) that the ticker
@@ -1383,10 +1422,15 @@ func (d *Daemon) discoverVODs(ctx context.Context, ms []match.Match, priv *store
 	maxAge := time.Duration(d.cfg.YouTube.MaxAge)
 
 	channels := d.knownChannels(priv)
+	// YouTube has switched its RSS feeds off for weeks at a time (404 for
+	// every channel since December 2025). A channel whose feed failed is
+	// swept with yt-dlp far more often, so VODs keep arriving within hours.
+	feedDown := map[string]bool{}
 	for _, id := range channels {
 		videos, err := d.yt.Videos(ctx, id)
 		if err != nil {
 			d.logger.Printf("youtube %s: %v", id, err)
+			feedDown[id] = true
 			continue
 		}
 		d.rememberVideos(videos, priv)
@@ -1399,7 +1443,7 @@ func (d *Daemon) discoverVODs(ctx context.Context, ms []match.Match, priv *store
 	// reading further back than a feed goes.
 	if d.cfg.YouTube.Backfill && d.ytBack.Available() {
 		if missing := unmatchedFinished(ms, maxAge); len(missing) > 0 {
-			if d.backfillVODs(ctx, missing, channels, priv) {
+			if d.backfillVODs(ctx, missing, channels, feedDown, priv) {
 				found += d.matchVODs(ms, priv, maxAge)
 			}
 		}
@@ -1451,6 +1495,9 @@ const (
 	// videoSweepTTL spaces out the deep channel walk. It is much heavier than
 	// an RSS poll, and a channel's back catalogue does not change.
 	videoSweepTTL = 24 * time.Hour
+	// feedDownSweepTTL replaces it for a channel whose RSS feed is failing,
+	// when the sweep is the only way new uploads are seen at all.
+	feedDownSweepTTL = 2 * time.Hour
 	// maxHydrate bounds how many publish dates one sweep resolves. Each costs
 	// its own request, so this is the real cost ceiling of a backfill.
 	maxHydrate = 60
@@ -1458,13 +1505,17 @@ const (
 
 // backfillVODs walks channels with yt-dlp to recover uploads that have already
 // left the RSS window, and reports whether it learned anything new.
-func (d *Daemon) backfillVODs(ctx context.Context, missing []match.Match, channels []string, priv *store.Private) bool {
+func (d *Daemon) backfillVODs(ctx context.Context, missing []match.Match, channels []string, feedDown map[string]bool, priv *store.Private) bool {
 	if priv.VideoSweeps == nil {
 		priv.VideoSweeps = map[string]time.Time{}
 	}
 	added := 0
 	for _, ch := range channels {
-		if time.Since(priv.VideoSweeps[ch]) < videoSweepTTL {
+		ttl := videoSweepTTL
+		if feedDown[ch] {
+			ttl = feedDownSweepTTL
+		}
+		if time.Since(priv.VideoSweeps[ch]) < ttl {
 			continue
 		}
 		listing, err := d.ytBack.List(ctx, ch)

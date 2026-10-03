@@ -94,6 +94,7 @@ function sanitizeOpponent(o) {
     short: scrubText(o.short),
     page: wikiPath(o.page),
     hidden: o.hidden === true,
+    race: raceOf(o.race),
     logo: {
       light: safeLogoSource(logo.light),
       dark: safeLogoSource(logo.dark),
@@ -490,14 +491,23 @@ function isMasked(match) { return !!(match && match.masked) }
 function isHiddenOpponent(o) { return !!(o && o.hidden) }
 
 // opponentLabel renders a side, showing a placeholder when it was withheld.
+// A StarCraft player's race, from a fixed set; anything else is dropped.
+function raceOf(r) {
+  return (r === "Protoss" || r === "Terran" || r === "Zerg" || r === "Random") ? r : ""
+}
+// "herO (P)": the race initial StarCraft fans use for matchups like PvZ.
+function raceSuffix(o) {
+  var r = o ? raceOf(o.race) : ""
+  return r ? " (" + r.charAt(0) + ")" : ""
+}
 function opponentLabel(o) {
   if (isHiddenOpponent(o)) return "?"
-  return opponentName(o)
+  return opponentName(o) + raceSuffix(o)
 }
 
 function fullOpponentLabel(o) {
   if (isHiddenOpponent(o)) return "Hidden until you catch up"
-  return fullName(o)
+  return fullName(o) + (o && raceOf(o.race) ? " (" + raceOf(o.race) + ")" : "")
 }
 
 // maskExplanation says why a fixture is hidden, in the UI's own words.

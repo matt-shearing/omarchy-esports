@@ -330,5 +330,14 @@ check("parseProfiles survives junk", () => {
      "a non-array roster is replaced:");
 });
 
+check("StarCraft race shows as an initial, junk races are dropped", () => {
+  const o = Model.sanitizeOpponent({ name: "herO", short: "herO", race: "Protoss" });
+  if (Model.opponentLabel(o) !== "herO (P)") throw new Error(Model.opponentLabel(o));
+  if (Model.fullOpponentLabel(o) !== "herO (Protoss)") throw new Error(Model.fullOpponentLabel(o));
+  if (Model.sanitizeOpponent({ name: "x", race: "<b>evil</b>" }).race !== "") throw new Error("junk race kept");
+  if (Model.opponentLabel({ name: "Team Spirit", short: "TSpirit" }) !== "TSpirit") throw new Error("team got a suffix");
+});
+
+
 console.log(failures === 0 ? "\nall passed" : `\n${failures} failed`);
 process.exit(failures === 0 ? 0 : 1);

@@ -139,7 +139,27 @@ func parseOpponent(n *html.Node, wiki string) match.Opponent {
 	}
 
 	o.Logo = parseLogo(n)
+	o.Race = parseRace(n)
 	return o
+}
+
+// parseRace reads a StarCraft player's race from the icon beside their name:
+// `<span class="race"><img alt="Protoss" ...>`. A team opponent carries one
+// icon per player, so it is only read when exactly one is present.
+func parseRace(n *html.Node) string {
+	races := findAllByClass(n, "race")
+	if len(races) != 1 {
+		return ""
+	}
+	img := firstTag(races[0], "img")
+	if img == nil {
+		return ""
+	}
+	switch r := attr(img, "alt"); r {
+	case "Protoss", "Terran", "Zerg", "Random":
+		return r
+	}
+	return ""
 }
 
 // parseLogo pulls the light and dark artwork variants. Liquipedia emits either

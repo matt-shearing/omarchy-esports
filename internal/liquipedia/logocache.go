@@ -232,11 +232,18 @@ func (c *LogoCache) Fetch(ctx context.Context, rawURL, userAgent string) (string
 			return c.download(ctx, orig, path, userAgent)
 		}
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("logo %s: %w", rawURL, ErrNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("logo %s: %s", rawURL, resp.Status)
 	}
 	return c.save(resp.Body, path)
 }
+
+// ErrNotFound reports a logo URL that no longer exists, usually because the
+// file was renamed on the wiki. The caller should look the logo up afresh.
+var ErrNotFound = errors.New("404 Not Found")
 
 // acquire enforces the per-host pause and the download pacing.
 //

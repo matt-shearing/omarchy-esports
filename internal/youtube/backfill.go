@@ -73,14 +73,23 @@ func (b *Backfiller) List(ctx context.Context, channelID string) ([]Video, error
 	if !b.Available() {
 		return nil, fmt.Errorf("yt-dlp not installed")
 	}
-	url := "https://www.youtube.com/channel/" + channelID + "/videos"
-	out, err := b.run(ctx, []string{
-		"--flat-playlist",
-		"--playlist-end", strconv.Itoa(b.limit),
-		"--ignore-errors", "--no-warnings",
-		"--print", "%(id)s" + unitSep + "%(title)s" + unitSep + "%(channel)s",
-		url,
-	})
+	// Broadcast channels that only go live have no Videos tab at all; their
+	// recordings sit under Streams. Try Videos first, then Streams.
+	var out []string
+	var err error
+	for _, tab := range []string{"videos", "streams"} {
+		out, err = b.run(ctx, []string{
+			"--flat-playlist",
+			"--playlist-end", strconv.Itoa(b.limit),
+			"--ignore-errors", "--no-warnings",
+			"--print", "%(id)s" + unitSep + "%(title)s" + unitSep + "%(channel)s",
+			"https://www.youtube.com/channel/" + channelID + "/" + tab,
+		})
+		if len(out) > 0 {
+			err = nil
+			break
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
