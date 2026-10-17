@@ -197,13 +197,12 @@ Panel {
         id: button
         bar: root.bar
         active: root.barInfo.live
-        text: {
-            var glyph = root.barInfo.live ? "󰐊" : "󰊴"
-            if (!root.showLabel || root.barInfo.text === "") return glyph
-            return glyph + "  " + Model.truncate(root.barInfo.text, 32)
-        }
+        // Omarchy 4 (r7025+) draws `text` as a single icon scaled to fit the
+        // icon slot; words beside it must go in `labelText`, sized by us.
+        text: root.barInfo.live ? "󰐊" : "󰊴"
+        labelText: (root.showLabel && root.barInfo.text !== "") ? Model.truncate(root.barInfo.text, 32) : ""
         slotSize: Style.bar.iconSlot
-        fixedWidth: (root.showLabel && root.barInfo.text !== "") ? -1 : slotSize
+        fixedWidth: labelText !== "" ? Math.ceil(barLabelMetrics.advanceWidth) + Style.space(4) + slotSize : slotSize
         tooltipText: {
             if (!root.model.ok) return "Esports · waiting for daemon"
             if (!root.barInfo.match) return "Esports · nothing scheduled"
@@ -216,6 +215,13 @@ Panel {
             if (b === Qt.RightButton) root.refresh()
             else root.toggle()
         }
+    }
+
+    TextMetrics {
+        id: barLabelMetrics
+        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.pixelSize: Style.bar.iconFont
+        text: button.labelText
     }
 
     // ---- dropdown ----
